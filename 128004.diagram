@@ -1,0 +1,189 @@
+format 224
+
+classcanvas 128004 class_ref 128004 // Agente
+  classdiagramsettings member_max_width 0 end
+  xyzwh 609.612 214.924 2000 149 144
+end
+classcanvas 128260 class_ref 128132 // Ambiente
+  classdiagramsettings member_max_width 0 end
+  xyzwh 808.06 399.4 2000 143 140
+end
+classcanvas 128388 class_ref 128260 // Simulador
+  classdiagramsettings member_max_width 0 end
+  xyzwh 598.374 544.687 2000 176 122
+end
+classcanvas 128516 class_ref 128388 // Objeto
+  classdiagramsettings member_max_width 0 end
+  xyzwh 1056.45 408.529 2000 152 109
+end
+classcanvas 128772 class_ref 128644 // Modo
+  classdiagramsettings member_max_width 0 end
+  xyzwh 857.588 155.038 2000 94 83
+end
+classcanvas 128900 class_ref 128772 // Política
+  classdiagramsettings member_max_width 0 end
+  xyzwh 1052.95 160.295 2000 115 78
+end
+classcanvas 131076 class_ref 129028 // Recurso
+  classdiagramsettings member_max_width 0 end
+  xyzwh 981.57 618.136 2000 135 105
+end
+classcanvas 131204 class_ref 129156 // Obstáculo
+  classdiagramsettings member_max_width 0 end
+  xyzwh 1125.27 618.076 2000 118 105
+end
+classcanvas 131844 class_ref 129284 // Ação
+  classdiagramsettings member_max_width 0 end
+  xyzwh 379.877 406.462 2000 136 95
+end
+classcanvas 133124 class_ref 129668 // Sensor
+  classdiagramsettings member_max_width 0 end
+  xyzwh 370.461 241.884 2000 157 90
+end
+classcanvas 134404 class_ref 129796 // Problema
+  classdiagramsettings member_max_width 0 end
+  xyzwh 401.86 593.14 2000 116 111
+end
+classcanvas 135044 class_ref 142852 // Mover
+  classdiagramsettings member_max_width 0 end
+  xyz 228.58 333.58 2000
+end
+classcanvas 135300 class_ref 142980 // Recolher
+  classdiagramsettings member_max_width 0 end
+  xyz 222.16 422.12 2000
+end
+classcanvas 135556 class_ref 143108 // Depositar
+  classdiagramsettings member_max_width 0 end
+  xyz 216.72 516.96 2000
+end
+classcanvas 135812 class_ref 143236 // AmbienteFarol
+  classdiagramsettings member_max_width 0 end
+  xyz 882.39 274.57 2000
+end
+classcanvas 136068 class_ref 143364 // AmbienteForaging
+  classdiagramsettings member_max_width 0 end
+  xyz 1049.09 273.6 2000
+end
+classcanvas 136324 class_ref 143492 // Foraging
+  classdiagramsettings member_max_width 0 end
+  xyz 218.72 642.32 2000
+end
+classcanvas 136452 class_ref 143620 // Farol
+  classdiagramsettings member_max_width 0 end
+  xyz 222.84 715.1 2000
+end
+classcanvas 137348 class_ref 150148 // Aprendizagem
+  classdiagramsettings member_max_width 0 end
+  xyz 717.79 74.36 2000
+end
+classcanvas 137732 class_ref 150276 // Avaliação
+  classdiagramsettings member_max_width 0 end
+  xyz 890.52 73.99 2000
+end
+relationcanvas 129412 relation_ref 128132 // aplica
+  from ref 128772 z 2001 label "aplica" italic max_width 255 xyz 980.5 178 2001 to ref 128900
+  no_role_a no_role_b
+  multiplicity_a_pos 1020 205 3000 multiplicity_b_pos 963 205 3000
+end
+relationcanvas 129796 relation_ref 128516 // <association>
+  decenter_end 400
+  from ref 128772 z 2001 to point 666.86 195.02
+  line 137220 z 2001 to ref 128004
+  no_role_a no_role_b
+  multiplicity_a_pos 637 190 3000 multiplicity_b_pos 823 205 3000
+end
+relationcanvas 131332 relation_ref 129412 // <dependency>
+  from ref 131076 z 2001 to ref 128516
+  no_role_a no_role_b
+  no_multiplicity_a no_multiplicity_b
+end
+relationcanvas 131460 relation_ref 129540 // <dependency>
+  from ref 131204 z 2001 to ref 128516
+  no_role_a no_role_b
+  no_multiplicity_a no_multiplicity_b
+end
+relationcanvas 132100 relation_ref 129668 // <association>
+  from ref 128004 z 2001 to ref 128260
+  no_role_a no_role_b
+  multiplicity_a_pos 788 421 3000 multiplicity_b_pos 771 374 3000
+end
+relationcanvas 133252 relation_ref 130436 // instala
+  from ref 133124 z 2001 label "instala" italic max_width 255 xyz 546 271 2001 to ref 128004
+  no_role_a no_role_b
+  multiplicity_a_pos 588 295 3000 multiplicity_b_pos 540 295 3000
+end
+relationcanvas 133508 relation_ref 130564 // contem
+  from ref 128260 z 2001 label "contem" italic max_width 255 xyz 981 446 2001 to ref 128516
+  no_role_a no_role_b
+  multiplicity_a_pos 1037 471 3000 multiplicity_b_pos 962 473 3000
+end
+relationcanvas 134020 relation_ref 130820 // executa
+  decenter_begin 141
+  from ref 128004 z 2001 label "executa" italic max_width 255 xyz 606 385 2001 to point 628.5 447.45
+  line 134660 z 2001 to ref 131844
+  no_role_a no_role_b
+  multiplicity_a_pos 528 459 3000 multiplicity_b_pos 613 367 3000
+end
+relationcanvas 134148 relation_ref 130948 // inicializa
+  from ref 128004 z 2001 label "inicializa" italic max_width 255 xyz 655 431 2001 to ref 128388
+  no_role_a no_role_b
+  multiplicity_a_pos 665 522 3000 multiplicity_b_pos 666 367 3000
+end
+relationcanvas 134532 relation_ref 131204 // <association>
+  from ref 134404 z 2001 to ref 128388
+  role_a_pos 578 596 3000 no_role_b
+  no_multiplicity_a multiplicity_b_pos 529 642 3000
+end
+relationcanvas 135172 relation_ref 144260 // <dependency>
+  from ref 135044 z 2001 to ref 131844
+  no_role_a no_role_b
+  no_multiplicity_a no_multiplicity_b
+end
+relationcanvas 135428 relation_ref 144388 // <dependency>
+  from ref 135300 z 2001 to ref 131844
+  no_role_a no_role_b
+  no_multiplicity_a no_multiplicity_b
+end
+relationcanvas 135684 relation_ref 144516 // <dependency>
+  from ref 135556 z 2001 to ref 131844
+  no_role_a no_role_b
+  no_multiplicity_a no_multiplicity_b
+end
+relationcanvas 135940 relation_ref 144644 // <dependency>
+  from ref 135812 z 2001 to ref 128260
+  no_role_a no_role_b
+  no_multiplicity_a no_multiplicity_b
+end
+relationcanvas 136196 relation_ref 144772 // <dependency>
+  from ref 136068 z 2001 to ref 128260
+  no_role_a no_role_b
+  no_multiplicity_a no_multiplicity_b
+end
+relationcanvas 136580 relation_ref 144900 // <dependency>
+  from ref 136324 z 2001 to ref 134404
+  no_role_a no_role_b
+  no_multiplicity_a no_multiplicity_b
+end
+relationcanvas 136708 relation_ref 145028 // <dependency>
+  from ref 136452 z 2001 to ref 134404
+  no_role_a no_role_b
+  no_multiplicity_a no_multiplicity_b
+end
+relationcanvas 136836 relation_ref 145156 // <association>
+  from ref 134404 z 2001 to point 456.9 742.2
+  line 137092 z 2001 to point 880.1 740.1
+  line 136964 z 2001 to ref 128260
+  no_role_a no_role_b
+  multiplicity_a_pos 860 546 3000 multiplicity_b_pos 438 711 3000
+end
+relationcanvas 137604 relation_ref 151812 // <dependency>
+  from ref 137348 z 2001 to ref 128772
+  no_role_a no_role_b
+  no_multiplicity_a no_multiplicity_b
+end
+relationcanvas 137860 relation_ref 151940 // <dependency>
+  from ref 137732 z 2001 to ref 128772
+  no_role_a no_role_b
+  no_multiplicity_a no_multiplicity_b
+end
+end
