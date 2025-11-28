@@ -1,36 +1,64 @@
-# Visualizador simples usando pygame
 import pygame
 
-CELL = 30
-
 class Visualizador:
-    def __init__(self, width, height, title='simulador SMA'):
+    def __init__(self, width, height, title="Ambiente"):
         pygame.init()
-        self.w = width
-        self.h = height
-        self.screen = pygame.display.set_mode((width*CELL, height*CELL))
+        self.width = width
+        self.height = height
+        self.cell_size = 40
+        self.screen = pygame.display.set_mode((width*self.cell_size, height*self.cell_size))
         pygame.display.set_caption(title)
+        self.colors = {}  # cores atribuídas aos agentes
+        self.default_colors = [
+            (255,0,0), (0,255,0), (0,0,255), (255,255,0),
+            (255,0,255), (0,255,255), (128,128,128), (255,165,0)
+        ]
 
+    # Atribui cores únicas para cada agente
+    def assign_colors(self, agents):
+        for i, ag_id in enumerate(agents.keys()):
+            self.colors[ag_id] = self.default_colors[i % len(self.default_colors)]
+
+    # Desenha o grid com recursos, agentes, ninho ou farol
     def draw_grid(self, resources, agents, nest=None, target=None):
         self.screen.fill((255,255,255))
-        for x in range(self.w):
-            for y in range(self.h):
-                rect = pygame.Rect(x*CELL, y*CELL, CELL, CELL)
-                pygame.draw.rect(self.screen, (200,200,200), rect, 1)
-        for (x,y), val in resources.items():
-            rect = pygame.Rect(x*CELL+4, y*CELL+4, CELL-8, CELL-8)
-            pygame.draw.rect(self.screen, (255,200,0), rect)
-        if nest:
-            x,y = nest
-            rect = pygame.Rect(x*CELL+6, y*CELL+6, CELL-12, CELL-12)
-            pygame.draw.rect(self.screen, (150,150,255), rect)
-        if target:
-            x,y = target
-            pygame.draw.circle(self.screen, (255,0,0), (x*CELL+CELL//2, y*CELL+CELL//2), CELL//3)
-        for aid, (x,y) in agents.items():
-            rect = pygame.Rect(x*CELL+8, y*CELL+8, CELL-16, CELL-16)
-            pygame.draw.rect(self.screen, (0,180,0), rect)
-        pygame.display.flip()
 
-    def quit(self):
-        pygame.quit()
+        # Eventos pygame (necessário para não travar)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+
+        # Desenhar recursos
+        for (x,y), amt in resources.items():
+            pygame.draw.rect(
+                self.screen, (139,69,19),
+                (x*self.cell_size, y*self.cell_size, self.cell_size, self.cell_size)
+            )
+
+        # Desenhar agentes
+        for ag_id, (x,y) in agents.items():
+            color = self.colors.get(ag_id, (0,0,0))
+            pygame.draw.circle(
+                self.screen, color,
+                (x*self.cell_size + self.cell_size//2, y*self.cell_size + self.cell_size//2),
+                self.cell_size//3
+            )
+
+        # Desenhar ninho
+        if nest:
+            nx, ny = nest
+            pygame.draw.rect(
+                self.screen, (0,128,0),
+                (nx*self.cell_size, ny*self.cell_size, self.cell_size, self.cell_size), 2
+            )
+
+        # Desenhar farol ou target
+        if target:
+            tx, ty = target
+            pygame.draw.rect(
+                self.screen, (255,0,0),
+                (tx*self.cell_size, ty*self.cell_size, self.cell_size, self.cell_size), 2
+            )
+
+        pygame.display.flip()

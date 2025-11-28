@@ -16,13 +16,11 @@ class ForagingEnv(AmbienteBase):
     def reset(self):
         self.step = 0
         self.resources = {}
-        for i in range(self.n_resources):
+        for _ in range(self.n_resources):
             x = random.randint(0, self.w-1)
             y = random.randint(0, self.h-1)
             self.resources[(x,y)] = self.resources.get((x,y), 0) + 1
-        self.agent_pos = {}
-        for i in range(self.n_agents):
-            self.agent_pos[f'a{i}'] = (self.nest[0], self.nest[1])
+        self.agent_pos = {f'a{i}': self.nest for i in range(self.n_agents)}
         self.carrying = {f'a{i}': 0 for i in range(self.n_agents)}
         self.total_delivered = 0
         return self._state()
@@ -32,20 +30,23 @@ class ForagingEnv(AmbienteBase):
 
     def observacaoPara(self, agente):
         pos = self.agent_pos[agente.id]
+        x, y = pos
         neighbours = {}
-        x,y = pos
-        for dx,dy,name in [(-1,0,'L'),(1,0,'R'),(0,-1,'U'),(0,1,'D')]:
-            nx,ny = x+dx, y+dy
-            if 0<=nx<self.w and 0<=ny<self.h:
-                neighbours[name] = self.resources.get((nx,ny), 0)
+        for dx, dy, name in [(-1, 0, 'L'), (1, 0, 'R'), (0, -1, 'U'), (0, 1, 'D')]:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < self.w and 0 <= ny < self.h:
+                neighbours[name] = self.resources.get((nx, ny), 0)
             else:
                 neighbours[name] = -1
+        # recurso na própria célula
+        neighbours['C'] = self.resources.get((x, y), 0)
         return {'pos': pos, 'neigh': neighbours, 'carrying': self.carrying[agente.id], 'nest': self.nest}
 
     def agir(self, acao, agente):
         x,y = self.agent_pos[agente.id]
-        reward = 0
+        reward = 0.0
         terminated = False
+
         if acao == 'UP': y = max(0, y-1)
         elif acao == 'DOWN': y = min(self.h-1, y+1)
         elif acao == 'LEFT': x = max(0, x-1)
@@ -62,26 +63,25 @@ class ForagingEnv(AmbienteBase):
                 self.carrying[agente.id] = 0
                 self.total_delivered += 1
                 reward = 1.0
+
         self.agent_pos[agente.id] = (x,y)
-        self.step += 1
-        if self.step >= self.max_steps:
-            terminated = True
         return reward, terminated
 
     def atualizacao(self):
-        pass
+        self.step += 1
 
     def is_episode_done(self):
-        return False
+        # termina quando max_steps atingido
+        return self.step >= self.max_steps
 
     def render(self):
-        # pygame events (necessário para não crashar)
         import pygame
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 exit()
 
+        self.viewer.assign_colors(self.agent_pos)
         self.viewer.draw_grid(
             resources=self.resources,
             agents=self.agent_pos,
