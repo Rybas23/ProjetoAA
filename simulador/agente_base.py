@@ -1,3 +1,4 @@
+# agente_base.py
 import abc
 
 class AgenteBase(metaclass=abc.ABCMeta):
@@ -5,6 +6,9 @@ class AgenteBase(metaclass=abc.ABCMeta):
         self.id = id
         self.modo = modo
         self.ambiente = None
+        self.sensores = []
+        self.verbose = False
+        self.ultima_observacao = None
 
     @classmethod
     def cria(cls, params_file):
@@ -13,23 +17,31 @@ class AgenteBase(metaclass=abc.ABCMeta):
     def instala_ambiente(self, ambiente):
         self.ambiente = ambiente
 
-    @abc.abstractmethod
+    def instala(self, sensor):
+        """Instala um sensor - apenas armazena a configuração"""
+        self.sensores.append(sensor)
+        if self.verbose:
+            print(f"🔧 [{self.id}] Instalado: {sensor}")
+
     def observacao(self, obs):
-        pass
+        """Recebe observação do ambiente"""
+        self.ultima_observacao = obs
+        if self.verbose:
+            print(f"👀 [{self.id}] Observação: {obs}")
 
     @abc.abstractmethod
     def age(self):
+        """Decide ação baseada na última observação"""
         pass
 
     @abc.abstractmethod
     def avaliacaoEstadoAtual(self, recompensa):
+        """Processa recompensa da ação"""
         pass
 
     def reset(self, ep):
         pass
 
-    def instala(self, sensor):
-        self.sensor = sensor
-
     def comunica(self, mensagem, de_agente):
-        print(f'[{self.id}] received from {de_agente}: {mensagem}')
+        if self.verbose:
+            print(f'📨 [{self.id}] Mensagem de {de_agente.id}: {mensagem}')

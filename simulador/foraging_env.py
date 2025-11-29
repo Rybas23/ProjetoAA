@@ -3,15 +3,19 @@ from simulador.ambiente_base import AmbienteBase
 from simulador.visualizador import Visualizador
 
 class ForagingEnv(AmbienteBase):
-    def __init__(self, width=10, height=10, n_agents=2, n_resources=10, nest=(0,0), max_steps=200):
+    def __init__(self, width=10, height=10, n_resources=10, nest=(0,0), max_steps=200):
         self.w = width
         self.h = height
-        self.n_agents = n_agents
         self.n_resources = n_resources
         self.nest = nest
         self.max_steps = max_steps
         self.step = 0
         self.viewer = Visualizador(width, height, title="Foraging")
+        self.agent_ids = []  # ⬅️ GUARDAR IDs DOS AGENTES
+
+    def registar_agentes(self, agentes):
+        """Regista os IDs dos agentes no ambiente"""
+        self.agent_ids = [ag.id for ag in agentes]
 
     def reset(self):
         self.step = 0
@@ -20,9 +24,16 @@ class ForagingEnv(AmbienteBase):
             x = random.randint(0, self.w-1)
             y = random.randint(0, self.h-1)
             self.resources[(x,y)] = self.resources.get((x,y), 0) + 1
-        self.agent_pos = {f'a{i}': self.nest for i in range(self.n_agents)}
-        self.carrying = {f'a{i}': 0 for i in range(self.n_agents)}
+
+        # ⬇️ USAR OS IDs REAIS DOS AGENTES
+        self.agent_pos = {}
+        self.carrying = {}
+        for agent_id in self.agent_ids:
+            self.agent_pos[agent_id] = self.nest
+            self.carrying[agent_id] = 0
+
         self.total_delivered = 0
+        print(f"🤖 Agentes registados: {list(self.agent_pos.keys())}")
         return self._state()
 
     def _state(self):
@@ -75,15 +86,16 @@ class ForagingEnv(AmbienteBase):
         return self.step >= self.max_steps
 
     def render(self):
-        import pygame
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                exit()
+        if not hasattr(self, 'viewer') or not self.viewer:
+            return
 
-        self.viewer.assign_colors(self.agent_pos)
-        self.viewer.draw_grid(
+        success = self.viewer.draw_grid(
             resources=self.resources,
             agents=self.agent_pos,
             nest=self.nest
         )
+
+        # Se o draw_grid retornar False, a janela foi fechada
+        if not success:
+            print("🖼️ Visualização fechada pelo utilizador")
+            return
