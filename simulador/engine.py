@@ -12,46 +12,47 @@ class MotorDeSimulacao:
         self.params = parametros_execucao  # dicionário de parâmetros
         self.ambiente = None               # ambiente (Farol ou Foraging)
         self.agentes = []                  # lista de agentes ativos
-        self.max_steps = parametros_execucao.get('max_steps', 500) # buscar input, default 500
+        self.max_steps = parametros_execucao.get("max_steps", 500)  # default 500
         self.metrics = defaultdict(list)   # métricas registadas
         self.visualizador = None           # objeto visualizador opcional
         self.tracker = None                # rastreador de métricas detalhadas
         # Novo: mapa de spawns iniciais por id de agente
         self.agent_spawns = {}
 
-    # Inicializar lendo ficheiro JSON
+    # Inicializar lendo ficheiro JSON ou usando dict
     @classmethod
     def cria(cls, params):
         if isinstance(params, str):
             import json
-            with open(params, 'r') as f:
+            with open(params, "r") as f:
                 params = json.load(f)
 
         motor = cls(params)
 
         # ---------- CRIAR AMBIENTE ----------
         problem = params.get("problem")
-
         env_cfg = params.get("environment", {})
 
         if problem == "Farol":
             from ambiente_farol import FarolEnv
+
             ambiente = FarolEnv(
                 size=env_cfg.get("size", 10),
                 max_steps=env_cfg.get("max_steps", 200),
                 farol_fixo=tuple(env_cfg.get("farol_fixo", None)),
-                paredes=[tuple(p) for p in env_cfg.get("walls", [])]
+                paredes=[tuple(p) for p in env_cfg.get("walls", [])],
             )
 
         elif problem == "Foraging":
             from ambiente_foraging import ForagingEnv
+
             ambiente = ForagingEnv(
                 width=env_cfg.get("width", 10),
                 height=env_cfg.get("height", 10),
                 n_resources=env_cfg.get("n_resources", 10),
                 ninho=tuple(env_cfg.get("ninho", (0, 0))),
                 max_steps=env_cfg.get("max_steps", 200),
-                paredes=[tuple(p) for p in env_cfg.get("walls", [])]
+                paredes=[tuple(p) for p in env_cfg.get("walls", [])],
             )
         else:
             raise ValueError("Problema desconhecido no JSON")
@@ -64,11 +65,10 @@ class MotorDeSimulacao:
         from policies import (
             policy_farol_inteligente,
             policy_foraging_inteligente,
-            policy_aleatoria
+            policy_aleatoria,
         )
 
         for ag_cfg in params.get("agents", []):
-
             tipo = ag_cfg["type"]
             ag_id = ag_cfg["id"]
             modo = ag_cfg.get("mode", "test")
@@ -93,19 +93,20 @@ class MotorDeSimulacao:
                 policy_map = {
                     "farol_inteligente": policy_farol_inteligente,
                     "foraging_inteligente": policy_foraging_inteligente,
-                    "random": policy_aleatoria
+                    "random": policy_aleatoria,
                 }
 
                 agente = FixedAgent(
                     id=ag_id,
                     politica=policy_map[policy_name],
-                    modo="test"
+                    modo="test",
                 )
 
             else:
                 raise ValueError(f"Tipo de agente desconhecido: {tipo}")
 
             motor.adiciona_agente(agente)
+
             # Spawn definido no JSON
             if "spawn" in ag_cfg:
                 motor.agent_spawns[ag_id] = tuple(ag_cfg["spawn"])
@@ -137,10 +138,10 @@ class MotorDeSimulacao:
     # EXECUÇÃO DA SIMULAÇÃO
     def executa(self, render=False, verbose=False):
         if self.ambiente is None:
-            raise RuntimeError('Ambiente não definido')
+            raise RuntimeError("Ambiente não definido")
 
         # Registar agentes no ambiente (se o ambiente tiver esse metodo)
-        if hasattr(self.ambiente, 'registar_agentes'):
+        if hasattr(self.ambiente, "registar_agentes"):
             self.ambiente.registar_agentes(self.agentes)
 
         self.cria_tracker()
@@ -149,24 +150,24 @@ class MotorDeSimulacao:
         for ag in self.agentes:
             ag.verbose = verbose
 
-        numero_episodios = self.params.get('episodes', 10)
+        numero_episodios = self.params.get("episodes", 10)
 
         # LOOP PRINCIPAL DE EPISÓDIOS #
         for ep in range(numero_episodios):
 
             if verbose:
                 print(f"\n🎬 INICIANDO EPISÓDIO {ep + 1}/{numero_episodios}")
-                print('='*50)
+                print("=" * 50)
 
             # Passar spawns ao reset se o ambiente suportar
-            if hasattr(self.ambiente, 'reset'):
+            if hasattr(self.ambiente, "reset"):
                 try:
                     estado_inicial = self.ambiente.reset(self.agent_spawns)
                 except TypeError:
                     # Ambiente ainda não suporta spawns explícitos
                     estado_inicial = self.ambiente.reset()
             else:
-                raise RuntimeError('Ambiente sem método reset')
+                raise RuntimeError("Ambiente sem método reset")
 
             # Reset dos agentes (política, memória, etc.)
             for ag in self.agentes:
@@ -210,7 +211,7 @@ class MotorDeSimulacao:
 
                 # 6. Renderização (se ativo)
                 if render:
-                    if hasattr(self.ambiente, 'render') and callable(self.ambiente.render):
+                    if hasattr(self.ambiente, "render") and callable(self.ambiente.render):
                         self.ambiente.render()
                     elif self.visualizador:
                         try:
@@ -218,34 +219,44 @@ class MotorDeSimulacao:
                         except Exception:
                             pass
 
-                    time.sleep(self.params.get('render_delay', 0.0))
+                    time.sleep(self.params.get("render_delay", 0.0))
 
             # Final do episódio — guardar métricas
             for ag in self.agentes:
-                self.metrics['reward_' + ag.id].append(recompensa_por_agente[ag.id])
+                self.metrics["reward_" + ag.id].append(recompensa_por_agente[ag.id])
 
-            self.metrics['steps'].append(passo_atual)
+            self.metrics["steps"].append(passo_atual)
 
             # Métrica de sucesso → ambiente Farol
-            if hasattr(self.ambiente, 'done_agents'):
-                sucesso = len(getattr(self.ambiente, 'done_agents', set())) / max(1, len(self.agentes))
-                self.metrics['success_rate'].append(sucesso)
+            if hasattr(self.ambiente, "done_agents"):
+                sucesso = len(getattr(self.ambiente, "done_agents", set())) / max(
+                    1, len(self.agentes)
+                )
+                self.metrics["success_rate"].append(sucesso)
 
             # Métrica de recursos → Foraging
-            if hasattr(self.ambiente, 'total_delivered'):
-                self.metrics['resources_delivered'].append(getattr(self.ambiente, 'total_delivered', 0))
+            if hasattr(self.ambiente, "total_delivered"):
+                self.metrics["resources_delivered"].append(
+                    getattr(self.ambiente, "total_delivered", 0)
+                )
 
             # Registo especializado para o tracker
             try:
-                if hasattr(self.ambiente, 'farol'):
-                    self.tracker.regista_farol(self.ambiente, recompensa_por_agente, steps=passo_atual)
-                if hasattr(self.ambiente, 'resources'):
-                    self.tracker.regista_foraging(self.ambiente, recompensa_por_agente, steps=passo_atual)
+                if hasattr(self.ambiente, "farol"):
+                    self.tracker.regista_farol(
+                        self.ambiente, recompensa_por_agente, steps=passo_atual
+                    )
+                if hasattr(self.ambiente, "resources"):
+                    self.tracker.regista_foraging(
+                        self.ambiente, recompensa_por_agente, steps=passo_atual
+                    )
             except Exception:
                 pass
 
             if verbose:
-                print(f"🏁 EP {ep+1} done steps={passo_atual} rewards={recompensa_por_agente}")
+                print(
+                    f"🏁 EP {ep+1} done steps={passo_atual} rewards={recompensa_por_agente}"
+                )
 
         # Dados extra gerados pelo tracker
         extras = dict(self.tracker.data) if self.tracker else {}

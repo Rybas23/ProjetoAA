@@ -6,11 +6,11 @@ from tkinter import scrolledtext
 class Visualizador:
     # Símbolos para visualização
     SYMBOLS = {
-        'empty': '.',
-        'wall': 'W',
-        'resource': 'R',
-        'ninho': 'N',
-        'farol': 'F'
+        "empty": ".",
+        "wall": "W",
+        "resource": "R",
+        "ninho": "N",
+        "farol": "F",
     }
 
     def __init__(self, grid_width, grid_height, title="Ambiente", fps=5, cell_size=40):
@@ -39,7 +39,7 @@ class Visualizador:
             self._root,
             width=self.width + 4,   # margem para bordas
             height=self.height + 4,  # margem
-            font=("Consolas", 12)
+            font=("Consolas", 12),
         )
         self._text.pack(fill=tk.BOTH, expand=True)
 
@@ -57,8 +57,10 @@ class Visualizador:
     # ==================== LÓGICA DE GRELHA ====================
 
     def _create_empty_grid(self):
-        return [[self.SYMBOLS['empty'] for _ in range(self.width)]
-                for _ in range(self.height)]
+        return [
+            [self.SYMBOLS["empty"] for _ in range(self.width)]
+            for _ in range(self.height)
+        ]
 
     def _is_valid_position(self, x, y):
         return 0 <= x < self.width and 0 <= y < self.height
@@ -104,7 +106,6 @@ class Visualizador:
             lines.append("|" + "".join(row) + "|")
         lines.append("+" + "-" * self.width + "+")
 
-
         full_text = "\n".join(lines)
 
         # Atualizar widget de texto
@@ -130,21 +131,21 @@ class Visualizador:
         grid = self._create_empty_grid()
 
         # Ordem de desenho
-        self._draw_elements(grid, walls, self.SYMBOLS['wall'])
-        self._draw_elements(grid, resources.keys(), self.SYMBOLS['resource'])
-        self._draw_single_element(grid, ninho, self.SYMBOLS['ninho'])
-        self._draw_single_element(grid, farol, self.SYMBOLS['farol'])
+        self._draw_elements(grid, walls, self.SYMBOLS["wall"])
+        self._draw_elements(grid, resources.keys(), self.SYMBOLS["resource"])
+        self._draw_single_element(grid, ninho, self.SYMBOLS["ninho"])
+        self._draw_single_element(grid, farol, self.SYMBOLS["farol"])
         self._draw_agents(grid, agents)
 
         self._print_grid(grid, agents)
         return True
 
     def draw(self, ambiente):
-        recursos = getattr(ambiente, 'resources', {})
+        recursos = getattr(ambiente, "resources", {})
         agentes = ambiente.agent_pos
-        ninho = getattr(ambiente, 'ninho', None)
-        farol = getattr(ambiente, 'farol', None)
-        walls = getattr(ambiente, 'walls', None)  # funciona para Farol e Foraging
+        ninho = getattr(ambiente, "ninho", None)
+        farol = getattr(ambiente, "farol", None)
+        walls = getattr(ambiente, "walls", None)  # funciona para Farol e Foraging
 
         return self.draw_grid(recursos, agentes, ninho=ninho, farol=farol, walls=walls)
 

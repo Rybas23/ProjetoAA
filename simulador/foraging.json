@@ -1,6 +1,9 @@
 {
   "problem": "Foraging",
 
+  "episodes": 50,
+  "max_steps": 200,
+
   "environment": {
     "width": 10,
     "height": 10,
@@ -17,19 +20,22 @@
   },
 
   "simulation": {
-    "episodes": 50,
-    "render_delay": 0.05,
+    "render": true,
     "verbose": true,
-    "render": true
+    "render_delay": 0.05,
+    "use_visualizer": true
   },
 
   "agents": [
     {
       "type": "QAgentForaging",
-      "id": "q1",
+      "id": "QF1",
       "mode": "learn",
       "spawn": [0, 0]
     }
-  ]
-}
+  ],
 
+  "output": {
+    "csv": "learning_foraging_QF1.csv"
+  }
+}

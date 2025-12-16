@@ -16,22 +16,22 @@ class SensorVisao(Sensor):
         # Compatibilidade com o código original
         if alcance is not None:
             alc = alcance
-        super().__init__('visao', alc)
+        super().__init__("visao", alc)
 
 
 # Sensor que aponta direção do Farol (ambiente Farol)
 class SensorFarol(Sensor):
     def __init__(self):
-        super().__init__('farol', 0)
+        super().__init__("farol", 0)
 
 
 # Sensor utilizado no Foraging (detetar posição do ninho)
 class SensorNinho(Sensor):
     def __init__(self):
-        super().__init__('ninho', 0)
+        super().__init__("ninho", 0)
 
 
 # Sensor utilizado no Foraging para saber se o agente está a carregar recurso
 class SensorCarregando(Sensor):
     def __init__(self):
-        super().__init__('carregando', 0)
+        super().__init__("carregando", 0)

@@ -26,20 +26,33 @@ class MetricsTracker:
             else:
                 distancia = self._manhattan(posicao_agente, ambiente.farol)
                 self.data[f"dist_final_{agent_id}"].append(distancia)
-                self.data[f"sucesso_{agent_id}"].append(1 if posicao_agente == ambiente.farol else 0)
+                self.data[f"sucesso_{agent_id}"].append(
+                    1 if posicao_agente == ambiente.farol else 0
+                )
 
         if steps is not None:
-            self.data['steps_ep'].append(steps)
+            self.data["steps_ep"].append(steps)
+
+        # Também guardar recompensa total por agente, se fornecido
+        for agente in self.agentes:
+            agent_id = agente.id
+            self.data[f"reward_{agent_id}"].append(
+                recompensa_episodio.get(agent_id, 0)
+            )
 
     # Registo de métricas específicas do ambiente Foraging
     def regista_foraging(self, ambiente, recompensa_episodio, steps=None):
         # Total de recursos entregues no episódio
-        self.data['resources_delivered'].append(getattr(ambiente, 'total_delivered', 0))
+        self.data["resources_delivered"].append(
+            getattr(ambiente, "total_delivered", 0)
+        )
 
         if steps is not None:
-            self.data['steps_ep'].append(steps)
+            self.data["steps_ep"].append(steps)
 
         # Guarda recompensa total por agente
         for agente in self.agentes:
             agent_id = agente.id
-            self.data[f"reward_{agent_id}"].append(recompensa_episodio.get(agent_id, 0))
+            self.data[f"reward_{agent_id}"].append(
+                recompensa_episodio.get(agent_id, 0)
+            )

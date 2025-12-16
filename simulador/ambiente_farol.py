@@ -19,7 +19,7 @@ class FarolEnv:
     def __init__(self, size=10, max_steps=200, farol_fixo=None, paredes=None):
         self.size = size                     # Tamanho da grelha NxN
         self.max_steps = max_steps           # Limite máximo de passos
-        self.farol = farol_fixo or (size//2, size//2)  # Posição do farol
+        self.farol = farol_fixo or (size // 2, size // 2)  # Posição do farol
 
         # Conjunto de posições ocupadas por paredes/obstáculos
         # Cada parede é um tuplo (x, y)
@@ -37,7 +37,7 @@ class FarolEnv:
         self.agent_ids = [ag.id for ag in agentes]
 
     # ------------------------------------------------------------
-    # Reinicia o ambiente e posiciona agentes com  spawn fixo
+    # Reinicia o ambiente e posiciona agentes com spawn fixo
     # ------------------------------------------------------------
     def reset(self, agent_spawns=None):
         self.step = 0
@@ -61,7 +61,12 @@ class FarolEnv:
             if agent_id in agent_spawns:
                 sx, sy = agent_spawns[agent_id]
                 # Usa o spawn apenas se estiver dentro da grelha e não for parede/farol
-                if 0 <= sx < self.size and 0 <= sy < self.size and (sx, sy) != self.farol and (sx, sy) not in self.walls:
+                if (
+                    0 <= sx < self.size
+                    and 0 <= sy < self.size
+                    and (sx, sy) != self.farol
+                    and (sx, sy) not in self.walls
+                ):
                     self.agent_pos[agent_id] = (sx, sy)
                     usados.add((sx, sy))
 
@@ -78,22 +83,22 @@ class FarolEnv:
     # Estado global do ambiente
     def _state(self):
         return {
-            'farol': self.farol,
-            'agents': dict(self.agent_pos),
-            'walls': list(self.walls)
+            "farol": self.farol,
+            "agents": dict(self.agent_pos),
+            "walls": list(self.walls),
         }
 
     # Gera observação para um agente específico
     def observacaoPara(self, agente):
         (x, y) = self.agent_pos[agente.id]
-        observacao = {'pos': (x, y)}
+        observacao = {"pos": (x, y)}
 
         for sensor in agente.sensores:
-            if sensor.tipo == 'farol':
-                observacao['direcao_farol'] = self._dir((x, y)).value
+            if sensor.tipo == "farol":
+                observacao["direcao_farol"] = self._dir((x, y)).value
 
-            if sensor.tipo == 'visao':
-                observacao['visao'] = self._visao(x, y, sensor.alcance)
+            if sensor.tipo == "visao":
+                observacao["visao"] = self._visao(x, y, sensor.alcance)
 
         return observacao
 
@@ -118,11 +123,11 @@ class FarolEnv:
         resultado = {}
 
         vizinhos = {
-            'L': (x - 1, y),
-            'R': (x + 1, y),
-            'U': (x, y - 1),
-            'D': (x, y + 1),
-            'C': (x, y)
+            "L": (x - 1, y),
+            "R": (x + 1, y),
+            "U": (x, y - 1),
+            "D": (x, y + 1),
+            "C": (x, y),
         }
 
         for chave, (nx, ny) in vizinhos.items():
@@ -130,12 +135,12 @@ class FarolEnv:
 
                 # Posição é uma parede
                 if (nx, ny) in self.walls:
-                    resultado[chave] = 'PAREDE'
+                    resultado[chave] = "PAREDE"
                     continue
 
                 # Farol na visão
                 if (nx, ny) == self.farol:
-                    resultado[chave] = 'FAROL'
+                    resultado[chave] = "FAROL"
                     continue
 
                 # Verificar se existe algum agente na posição
@@ -145,10 +150,10 @@ class FarolEnv:
                         encontrado = f"AG_{ag_id}"
                         break
 
-                resultado[chave] = encontrado or 'VAZIO'
+                resultado[chave] = encontrado or "VAZIO"
 
             else:
-                resultado[chave] = 'PAREDE'
+                resultado[chave] = "PAREDE"
 
         return resultado
 
@@ -158,29 +163,28 @@ class FarolEnv:
         return abs(fx - x) + abs(fy - y)
 
     def _efeito_celula(self, x, y):
-        """Devolve o tipo de célula e efeitos básicos de recompensa/bloqueio.
-        """
+        """Devolve o tipo de célula e efeitos básicos de recompensa/bloqueio."""
         # Paredes
         if (x, y) in self.walls:
             return {
-                'tipo': 'parede',
-                'recompensa': -0.2,
-                'bloqueia': True,
+                "tipo": "parede",
+                "recompensa": -0.2,
+                "bloqueia": True,
             }
 
         # Farol
         if (x, y) == self.farol:
             return {
-                'tipo': 'farol',
-                'recompensa': 10.0,
-                'bloqueia': False,
+                "tipo": "farol",
+                "recompensa": 10.0,
+                "bloqueia": False,
             }
 
         # Vazio
         return {
-            'tipo': 'vazio',
-            'recompensa': 0.0,
-            'bloqueia': False,
+            "tipo": "vazio",
+            "recompensa": 0.0,
+            "bloqueia": False,
         }
 
     def agir(self, acao, agente):
@@ -199,13 +203,13 @@ class FarolEnv:
         dist_antes = self._dist_manhattan((x, y))
 
         # 1) Propor novo movimento (ainda sem aplicar)
-        if acao == 'UP' and y > 0:
+        if acao == "UP" and y > 0:
             novo_y = y - 1
-        elif acao == 'DOWN' and y < self.size - 1:
+        elif acao == "DOWN" and y < self.size - 1:
             novo_y = y + 1
-        elif acao == 'LEFT' and x > 0:
+        elif acao == "LEFT" and x > 0:
             novo_x = x - 1
-        elif acao == 'RIGHT' and x < self.size - 1:
+        elif acao == "RIGHT" and x < self.size - 1:
             novo_x = x + 1
         else:
             # Ação inválida (inclui qualquer coisa que não seja movimento)
@@ -215,16 +219,16 @@ class FarolEnv:
         efeito = self._efeito_celula(novo_x, novo_y)
 
         # Se for parede, não se mexe e aplica apenas a recompensa da parede
-        if efeito['tipo'] == 'parede' and efeito.get('bloqueia', False):
+        if efeito["tipo"] == "parede" and efeito.get("bloqueia", False):
             self.agent_pos[agente_id] = (x, y)
-            return efeito['recompensa'], False
+            return efeito["recompensa"], False
 
         # 3) Aplicar movimento
         self.agent_pos[agente_id] = (novo_x, novo_y)
 
         # 4) Se chegou ao farol → episódio termina para este agente
-        if efeito['tipo'] == 'farol':
-            recompensa = efeito['recompensa']
+        if efeito["tipo"] == "farol":
+            recompensa = efeito["recompensa"]
             self.done_agents.add(agente_id)
             terminou = True
             return recompensa, terminou
@@ -233,14 +237,15 @@ class FarolEnv:
         dist_depois = self._dist_manhattan((novo_x, novo_y))
 
         if dist_depois < dist_antes:
-            recompensa = +0.05  # aproximou-se
+            recompensa = +0.05  # aproximou\-se
         elif dist_depois > dist_antes:
-            recompensa = -0.05  # afastou-se
+            recompensa = -0.05  # afastou\-se
         else:
             recompensa = -0.01  # custo neutro por não mudar distância
 
         # Soma eventual recompensa base do tipo de célula (normalmente 0)
-        recompensa += efeito.get('recompensa', 0.0) if efeito['tipo'] == 'vazio' else 0.0
+        if efeito["tipo"] == "vazio":
+            recompensa += efeito.get("recompensa", 0.0)
 
         return recompensa, terminou
 
@@ -250,7 +255,4 @@ class FarolEnv:
 
     # Condição de fim do episódio
     def is_episode_done(self):
-        return (
-            self.step >= self.max_steps or
-            len(self.done_agents) == len(self.agent_ids)
-        )
+        return self.step >= self.max_steps or len(self.done_agents) == len(self.agent_ids)

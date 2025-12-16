@@ -3,16 +3,22 @@ from enum import Enum
 
 class AgenteBase:
     def __init__(self, id, modo='test'):
-        self.id = id                     # Nome ou identificador do agente
-        self.modo = modo                 # 'test' ou 'learn'
-        self.ambiente = None             # Referência ao ambiente
-        self.sensores = []               # Lista de sensores instalados
-        self.verbose = False             # Debug
-        self.ultima_observacao = None    # Última observação recebida
+        self.id = id
+        self.modo = modo           # "learn" ou "test"
+        self.ambiente = None
+        self.sensores = []
+        self.ultima_observacao = None
+        self.verbose = False
+
+        # Métricas por episódio (genéricas)
+        self._current_reward = 0.0
+        self._current_steps = 0
+        self.episode_rewards = []
+        self.episode_lengths = []
 
     @classmethod
     def cria(cls, p):
-        raise NotImplementedError
+        return cls(id=p.get('id', 'agente'), modo=p.get('mode', 'test'))
 
     def instala_ambiente(self, ambiente):
         self.ambiente = ambiente
@@ -22,38 +28,60 @@ class AgenteBase:
 
     def observacao(self, observacao_dict):
         self.ultima_observacao = observacao_dict
-        if self.verbose:
-            print(f"[{self.id}] observação: {observacao_dict}")
 
     def comunica(self, mensagem, agente_origem):
         if self.verbose:
-            print(f"[{self.id}] recebeu msg '{mensagem}' de {agente_origem.id}")
+            print(f"[{self.id}] recebeu mensagem de {agente_origem.id}: {mensagem}")
+
+    # --- interface que subclasses devem implementar ---
 
     def age(self):
         raise NotImplementedError
 
     def avaliacaoEstadoAtual(self, recompensa):
-        """Chamado após o ambiente dar a recompensa."""
-        pass
+        # Atualiza métricas genéricas; subclasses podem sobrescrever mas
+        # devem chamar super() para manter estes contadores.
+        self._current_reward += float(recompensa)
 
     def reset(self, episodio):
-        """Chamado no início de cada episódio."""
-        pass
+        # Fecha episódio anterior e guarda métricas
+        if self._current_steps > 0 or self._current_reward != 0.0:
+            self.episode_rewards.append(self._current_reward)
+            self.episode_lengths.append(self._current_steps)
+
+        # Reinicia contadores
+        self._current_reward = 0.0
+        self._current_steps = 0
+        self.ultima_observacao = None
+
+    def regista_passo(self):
+        # Chamado em cada passo pelo motor (ou dentro de age())
+        self._current_steps += 1
+
+    def get_metrics(self):
+        # Devolve cópias para análise externa
+        return {
+            'rewards': list(self.episode_rewards),
+            'lengths': list(self.episode_lengths),
+        }
 
 #  AGENTE FIXO (NÃO APRENDE)
 class FixedAgent(AgenteBase):
     def __init__(self, id, politica, modo='test'):
-        super().__init__(id, modo)
-        self.politica = politica
-
-    @classmethod
-    def cria(cls, p):
-        # Por omissão, usar uma política que se move sempre 'UP'
-        return cls('fixed', lambda o: 'UP')
+        super().__init__(id=id, modo=modo)
+        self.politica = politica  # função: observacao_dict -> acao
 
     def age(self):
-        return self.politica(self.ultima_observacao or {})
+        if self.ultima_observacao is None:
+            raise RuntimeError(f"[{self.id}] age() chamado sem observação")
 
+        acao = self.politica(self.ultima_observacao)
+        self.regista_passo()
+        return acao
+
+    def avaliacaoEstadoAtual(self, recompensa):
+        # FixedAgent não aprende, apenas regista métricas
+        super().avaliacaoEstadoAtual(recompensa)
 
 #  BASE DE UM AGENTE COM Q-LEARNING
 class QAgentBase(AgenteBase):
@@ -61,163 +89,190 @@ class QAgentBase(AgenteBase):
                  alpha=0.4, gamma=0.95,
                  epsilon=0.2, modo='learn'):
 
-        super().__init__(id, modo)
+        super().__init__(id=id, modo=modo)
 
-        # Hiperparâmetros do Q-learning
-        self.acoes = lista_acoes      # Lista de ações válidas no ambiente
-        self.alpha = alpha            # Taxa de aprendizagem
-        self.gamma = gamma            # Fator de desconto do futuro
-        self.epsilon = epsilon        # Probabilidade de explorar (ε-greedy)
+        # Q-learning params
+        self.acoes = list(lista_acoes)
+        self.alpha = float(alpha)
+        self.gamma = float(gamma)
+        self.epsilon = float(epsilon)
 
-        # Estrutura principal de aprendizagem
         # Q-table: dict[state][action] = valor-Q
         self.qtable = {}
 
-        # Guardar a última decisão tomada pelo agente
+        # Último estado/ação (para update)
         self.estado_anterior = None
         self.acao_anterior = None
 
-    # ESCOLHER UMA AÇÃO (ε-greedy)
+        # epsilon mínimo e taxa de decaimento (para learning)
+        self.epsilon_min = 0.05
+        self.epsilon_decay = 0.995
+
+    # --------- Representação de estado (override em subclasses) ---------
+
+    def _to_state(self, observacao):
+        # Fallback genérico: transforma dict em tuplo ordenado
+        if not isinstance(observacao, dict):
+            return tuple(observacao)
+        itens = []
+        for k in sorted(observacao.keys()):
+            v = observacao[k]
+            if isinstance(v, dict):
+                v = tuple(sorted(v.items()))
+            itens.append((k, v))
+        return tuple(itens)
+
+    # --------- Escolha de ação ---------
+
     def age(self):
-        observacao_atual = self.ultima_observacao
-        estado_atual = self._to_state(observacao_atual)
+        if self.ultima_observacao is None:
+            raise RuntimeError(f"[{self.id}] age() chamado sem observação")
 
-        # Garante que o estado existe na Q-table
+        estado_atual = self._to_state(self.ultima_observacao)
+
+        # Garantir estado na Q-table
         if estado_atual not in self.qtable:
-            self.qtable[estado_atual] = {
-                acao: 0.0 for acao in self.acoes
-            }
+            self.qtable[estado_atual] = {a: 0.0 for a in self.acoes}
 
-        # Política ε-greedy
+        # Política de seleção:
         if self.modo == 'learn' and random.random() < self.epsilon:
-            # EXPLORAÇÃO → escolhe ação aleatória
+            # exploração apenas em modo aprendizagem
             acao_escolhida = random.choice(self.acoes)
         else:
-            # EXPLORAÇÃO → escolhe a ação com maior Q
-            valor_maximo = max(self.qtable[estado_atual].values())
-            melhores_acoes = [
-                acao for acao, q in self.qtable[estado_atual].items()
-                if q == valor_maximo
-            ]
-            acao_escolhida = random.choice(melhores_acoes)
+            # modo test ou exploração desativada -> greedy sobre Q-table
+            q_vals = self.qtable[estado_atual]
+            max_q = max(q_vals.values())
+            melhores = [a for a, v in q_vals.items() if v == max_q]
+            acao_escolhida = random.choice(melhores)
 
-        # Guarda o que fez para poder aprender com o resultado
+        # Guardar para update futuro
         self.estado_anterior = estado_atual
         self.acao_anterior = acao_escolhida
 
+        # Contabilizar passo para métricas de episódio
+        self.regista_passo()
+
         return acao_escolhida
 
-    # -------------------------------------------------------------
-    # ATUALIZAÇÃO DO Q-LEARNING (RECEBE RECOMPENSA)
-    # -------------------------------------------------------------
+    # --------- Atualização Q-learning ---------
+
     def avaliacaoEstadoAtual(self, recompensa):
-        """Atualiza o valor Q(s, a) seguindo a fórmula do Q-learning."""
+        # Atualiza métricas genéricas
+        super().avaliacaoEstadoAtual(recompensa)
 
         if self.modo != 'learn':
+            # Em modo teste nunca se altera a política / Q-table
+            return
+
+        if self.estado_anterior is None or self.acao_anterior is None:
             return
 
         estado_passado = self.estado_anterior
         acao_passada = self.acao_anterior
 
-        # Se o agente ainda não tomou nenhuma ação (primeira iteração)
-        if estado_passado is None or acao_passada is None:
-            return
-
-        # Determina o novo estado (depois da ação anterior)
         estado_atual = self._to_state(self.ultima_observacao)
 
-        # Garante existência do estado atual na Q-table
         if estado_atual not in self.qtable:
             self.qtable[estado_atual] = {a: 0.0 for a in self.acoes}
 
-        # Máximo valor futuro — Q(s', a')
-        valor_maximo_proximo = max(self.qtable[estado_atual].values())
+        q_antigo = self.qtable[estado_passado][acao_passada]
+        q_max_prox = max(self.qtable[estado_atual].values())
 
-        # Fórmula do Q-learning:
-        # Q(s,a) ← Q(s,a) + α * (r + γ max_a' Q(s',a') − Q(s,a))
-        valor_antigo = self.qtable[estado_passado][acao_passada]
-        valor_novo = valor_antigo + self.alpha * (
-            recompensa + self.gamma * valor_maximo_proximo - valor_antigo
+        q_novo = q_antigo + self.alpha * (
+            recompensa + self.gamma * q_max_prox - q_antigo
         )
+        self.qtable[estado_passado][acao_passada] = q_novo
 
-        self.qtable[estado_passado][acao_passada] = valor_novo
+    # --------- Gestão de episódios e política pré-treinada ---------
 
-    # DECAY DO EPSILON A CADA EPISÓDIO
     def reset(self, episodio):
-        if self.modo == 'learn':
-            # Diminui o epsilon gradualmente até um mínimo
-            self.epsilon = max(0.05, self.epsilon * 0.995)
+        # fecha episódio anterior e reinicia métricas genéricas
+        super().reset(episodio)
 
+        # limpar memória temporária de estado/ação
+        self.estado_anterior = None
+        self.acao_anterior = None
+
+        # epsilon decay apenas em aprendizagem
+        if self.modo == 'learn':
+            self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
+
+    def save_qtable(self, path):
+        import pickle
+        with open(path, 'wb') as f:
+            pickle.dump(self.qtable, f)
+
+    def load_qtable(self, path):
+        import pickle
+        with open(path, 'rb') as f:
+            self.qtable = pickle.load(f)
 
 #  Q-AGENT PARA O AMBIENTE FAROL (FarolEnv)
 class QAgentFarol(QAgentBase):
+    def __init__(self, id='QFarol', lista_acoes=None, modo='learn'):
+        if lista_acoes is None:
+            lista_acoes = ['UP', 'DOWN', 'LEFT', 'RIGHT']
+        super().__init__(id=id, lista_acoes=lista_acoes, modo=modo)
 
     @classmethod
     def cria(cls, p):
-        # Ações válidas no ambiente Farol
+        if p is None:
+            return cls()
         return cls(
-            id='q_farol',
-            lista_acoes=['UP', 'DOWN', 'LEFT', 'RIGHT']
+            id=p.get('id', 'QFarol'),
+            lista_acoes=p.get('actions', ['UP', 'DOWN', 'LEFT', 'RIGHT']),
+            modo=p.get('mode', 'test')
         )
 
     def _to_state(self, observacao):
-        """Transforma a observação em um estado discreto (tupla)."""
+        # FarolEnv: usa posicao, direcao do farol e visão (se existir)
+        pos = tuple(observacao.get('pos', (0, 0)))
+        direcao = observacao.get('direcao_farol', 'NONE')
 
-        if not observacao:
-            return ('NONE',)
+        visao = observacao.get('visao')
+        if isinstance(visao, dict):
+            visao_state = tuple(sorted(visao.items()))
+        else:
+            visao_state = None
 
-        # Verifica se a observação contém dados do farol
-        if 'direcao_farol' in observacao and 'pos' in observacao:
-            (x_ag, y_ag) = observacao['pos']
-            (x_f, y_f) = self.ambiente.farol  # posição do farol
-
-            dx = x_f - x_ag
-            dy = y_f - y_ag
-
-            # Quantização da direção → {-1,0,1}
-            dx = 1 if dx > 0 else -1 if dx < 0 else 0
-            dy = 1 if dy > 0 else -1 if dy < 0 else 0
-
-            return ('FAROL', dx, dy)
-
-        return ('GEN', str(observacao))
-
+        return ('pos', pos, 'dir', direcao, 'visao', visao_state)
 
 #  Q-AGENT PARA O AMBIENTE DE FORAGING (ForagingEnv)
 class QAgentForaging(QAgentBase):
+    def __init__(self, id='QForaging', lista_acoes=None, modo='learn'):
+        if lista_acoes is None:
+            lista_acoes = ['UP', 'DOWN', 'LEFT', 'RIGHT', 'PICK', 'DROP']
+        super().__init__(id=id, lista_acoes=lista_acoes, modo=modo)
 
     @classmethod
     def cria(cls, p):
+        if p is None:
+            return cls()
         return cls(
-            id='q_forage',
-            lista_acoes=['UP', 'DOWN', 'LEFT', 'RIGHT', 'PICK', 'DROP']
+            id=p.get('id', 'QForaging'),
+            lista_acoes=p.get('actions', ['UP', 'DOWN', 'LEFT', 'RIGHT', 'PICK', 'DROP']),
+            modo=p.get('mode', 'test')
         )
 
     def _to_state(self, observacao):
-        if not observacao:
-            return ('NONE',)
+        # ForagingEnv: pos, visão de recursos, carregando, ninho relativo
+        pos = tuple(observacao.get('pos', (0, 0)))
 
-        # Ambiente de Foraging fornece uma visão local
-        if 'visao' in observacao:
-            vis = observacao['visao']
+        visao = observacao.get('visao', {})
+        if isinstance(visao, dict):
+            visao_state = tuple(sorted(visao.items()))
+        else:
+            visao_state = None
 
-            # Função auxiliar para verificar se há recurso
-            def tem_recurso(v):
-                if isinstance(v, int):
-                    return v > 0
-                return v == 'FAROL'  # compatível com ambientes mistos
+        carrying = int(observacao.get('carrying', 0))
 
-            # Codificação binária da visão
-            L = int(tem_recurso(vis.get('L')))
-            R = int(tem_recurso(vis.get('R')))
-            U = int(tem_recurso(vis.get('U')))
-            D = int(tem_recurso(vis.get('D')))
-            C = int(tem_recurso(vis.get('C')))
+        nest = observacao.get('nest', None)
+        if isinstance(nest, tuple):
+            nest_state = nest
+        else:
+            nest_state = None
 
-            carregando = observacao.get('carrying', 0)
-
-            # Estado final (tupla → bom para Q-table)
-            return ('FORAGE', L, R, U, D, C, carregando)
-
-        # Caso genérico (fallback)
-        return ('GEN', str(observacao))
+        return ('pos', pos,
+                'visao', visao_state,
+                'carry', carrying,
+                'nest', nest_state)

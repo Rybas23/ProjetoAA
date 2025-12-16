@@ -1,359 +1,261 @@
 import csv
-from engine import MotorDeSimulacao
-from ambiente_farol import FarolEnv
-from ambiente_foraging import ForagingEnv
+import os
+import copy
+import pickle
 
-from agentes import QAgentFarol, QAgentForaging, FixedAgent
-from sensors import SensorVisao, SensorFarol, SensorNinho,SensorCarregando
-from policies import (
-    policy_farol_inteligente,
-    policy_foraging_inteligente,
-    policy_aleatoria
-)
+from engine import MotorDeSimulacao
 from visualizador import Visualizador
 
 
 class SimuladorInterativo:
     """
-    Gere:
-    \- criação de ambientes e agentes
-    \- execução de simulações (interativo ou via JSON)
-    \- visualização em consola
-    \- exportação de métricas
+    Pequeno invólucro para manter compatibilidade com o modo anterior:
+    - executarJson(path_json)
+    - menu_principal() (placeholder simples)
     """
 
     def __init__(self):
-        self.parametros_base = {
-            'episodes': 5,
-            'max_steps': 100,
-            'render_delay': 0.05
-        }
+        pass
 
-    # ==================== FÁBRICAS BÁSICAS ====================
-
-    def _criar_ambiente(self, problema, tamanho=10):
-        """Cria ambiente Farol ou Foraging com defaults razoáveis."""
-        if problema == "Farol":
-            return FarolEnv(
-                size=tamanho,
-                farol_fixo=(tamanho // 2, tamanho // 2),
-                max_steps=self.parametros_base['max_steps']
-            )
-
-        # Foraging
-        return ForagingEnv(
-            width=tamanho,
-            height=tamanho,
-            n_resources=tamanho * 2,
-            ninho=(0, 0),
-            max_steps=self.parametros_base['max_steps']
-        )
-
-    def _criar_agente_farol(self, tipo, identificador, verbose=False):
-        """Cria um agente adequado ao ambiente Farol."""
-        if tipo == "QAgent":
-            agente = QAgentFarol(
-                id=identificador,
-                lista_acoes=['UP', 'DOWN', 'LEFT', 'RIGHT'],
-                modo='learn'
-            )
-        elif tipo == "FixedAgent":
-            agente = FixedAgent(
-                id=identificador,
-                politica=policy_farol_inteligente,
-                modo='test'
-            )
-        else:  # RandomAgent
-            agente = FixedAgent(
-                id=identificador,
-                politica=policy_aleatoria,
-                modo='test'
-            )
-
-        agente.instala(SensorVisao(alcance=1))
-        agente.instala(SensorFarol())
-        agente.verbose = verbose
-        return agente
-
-    def _criar_agente_foraging(self, tipo, identificador, verbose=False):
-        """Cria um agente adequado ao ambiente Foraging."""
-        if tipo == "QAgent":
-            agente = QAgentForaging(
-                id=identificador,
-                lista_acoes=['UP', 'DOWN', 'LEFT', 'RIGHT', 'PICK', 'DROP'],
-                modo='learn'
-            )
-        elif tipo == "FixedAgent":
-            agente = FixedAgent(
-                id=identificador,
-                politica=policy_foraging_inteligente,
-                modo='test'
-            )
-        else:  # RandomAgent
-            agente = FixedAgent(
-                id=identificador,
-                politica=policy_aleatoria,
-                modo='test'
-            )
-
-        agente.instala(SensorVisao(alcance=2))
-        agente.instala(SensorNinho())
-        agente.instala(SensorCarregando())
-        agente.verbose = verbose
-        return agente
-
-    def criar_agente(self, tipo_agente, identificador, problema, verbose=False):
-        """Wrapper público que delega para as fábricas específicas."""
-        if problema == "Farol":
-            return self._criar_agente_farol(tipo_agente, identificador, verbose)
-        return self._criar_agente_foraging(tipo_agente, identificador, verbose)
-
-    def _criar_visualizador_para_ambiente(self, ambiente, titulo="Simulacao"):
-        """Cria `Visualizador` adaptado a FarolEnv ou ForagingEnv."""
-        largura = getattr(ambiente, 'width', getattr(ambiente, 'size', 10))
-        altura = getattr(ambiente, 'height', getattr(ambiente, 'size', 10))
-        return Visualizador(
-            largura,
-            altura,
-            title=titulo,
-            fps=5
-        )
-
-    # ==================== EXECUÇÃO GENÉRICA ====================
-
-    def executar_simulacao(self, problema, configuracao_agentes,
-                            verbose=True, render=True, tamanho=10):
+    def executarJson(self, ficheiro_json):
         """
-        Executa simulação configurada via menus (não JSON).
-        `configuracao_agentes`: lista de tuplos (tipo, nome).
+        Lê um ficheiro JSON de configuração, executa a simulação e
+        exporta métricas para CSV (se existir diretiva no JSON).
         """
+        motor = MotorDeSimulacao.cria(ficheiro_json)
 
-        # 1\) Criar ambiente e agentes
-        ambiente = self._criar_ambiente(problema, tamanho)
-        lista_agentes = [
-            self.criar_agente(tipo, nome, problema, verbose)
-            for tipo, nome in configuracao_agentes
-        ]
+        params = motor.params
+        sim_cfg = params.get("simulation", {})
+        render = sim_cfg.get("render", False)
+        verbose = sim_cfg.get("verbose", False)
+        usar_visualizador = sim_cfg.get("use_visualizer", False)
 
-        # 2\) Construir parametros para o motor no formato esperado
-        params_motor = {
-            "problem": problema,
-            "environment": {},
-            "simulation": {
-                "episodes": self.parametros_base['episodes'],
-                "render_delay": self.parametros_base['render_delay'],
-                "verbose": verbose,
-                "render": render
-            },
-            "agents": []  # não é usado neste caminho, pois adicionamos manualmente
-        }
+        viz = None
+        if usar_visualizador:
+            # Tentar deduzir tamanho da grelha a partir do ambiente
+            amb = motor.ambiente
+            width = getattr(amb, "width", getattr(amb, "size", 10))
+            height = getattr(amb, "height", getattr(amb, "size", 10))
+            viz = Visualizador(
+                grid_width=width,
+                grid_height=height,
+                title=f"{params.get('problem', 'Simulacao')}",
+                fps=sim_cfg.get("fps", 5),
+            )
+            motor.liga_visualizador(viz)
 
-        motor = MotorDeSimulacao.cria(params_motor)
-        motor.adiciona_ambiente(ambiente)
+        metrics, extras = motor.executa(render=render, verbose=verbose)
 
-        for ag in lista_agentes:
-            motor.adiciona_agente(ag)
+        if viz:
+            viz.cleanup()
 
-        # 3\) Visualizador
-        if render:
-            try:
-                viz = self._criar_visualizador_para_ambiente(
-                    ambiente,
-                    titulo=f"{problema}"
-                )
-                motor.liga_visualizador(viz)
-            except Exception as e:
-                print(f"⚠️ Não foi possível criar visualizador: {e}")
+        # Exportar métricas para CSV se for pedido no JSON
+        out_cfg = params.get("output", {})
+        csv_path = out_cfg.get("csv", None)
+        if csv_path:
+            self._exporta_csv(csv_path, metrics, extras)
 
-        # 4\) Logs iniciais
-        print(f"\n🎮 INICIANDO SIMULAÇÃO: {problema}")
-        print(f"   Agentes: {', '.join([f'{nome} ({tipo})' for tipo, nome in configuracao_agentes])}")
-        print(f"   Episódios: {self.parametros_base['episodes']} | Passos máximos: {self.parametros_base['max_steps']}")
-        print('=' * 60)
+    def _exporta_csv(self, path, metrics, extras):
+        """
+        Exporta métricas e extras num único CSV "wide".
+        Cada chave torna-se uma coluna; valores são alinhados por índice.
+        """
+        # Juntar métricas + extras
+        all_data = {}
+        all_data.update(metrics or {})
+        all_data.update(extras or {})
 
-        # 5\) Executar motor
-        metricas, extras = motor.executa(render=render, verbose=verbose)
-
-        self.mostrar_resumo(metricas, extras, configuracao_agentes)
-        self.salva_csv(metricas, extras, filename=f'metrics_{problema}.csv')
-        return metricas, extras
-
-    # ==================== RESUMO E CSV ====================
-
-    def mostrar_resumo(self, metricas, extras, configuracao_agentes):
-        print("\n📊 RESUMO FINAL DA SIMULAÇÃO")
-        print("=" * 50)
-        print(f"🔍 Chaves nas métricas: {list(metricas.keys())}  | extras: {list(extras.keys())}")
-
-        for tipo_agente, nome_agente in configuracao_agentes:
-            chave_reward = f'reward_{nome_agente}'
-            valores = metricas.get(chave_reward) or []
-            if valores:
-                media = sum(valores) / len(valores)
-                print(f"   {nome_agente} ({tipo_agente}): média reward {media:.2f}  todos: {[round(v, 2) for v in valores]}")
+        # Determinar comprimento máximo
+        max_len = 0
+        for v in all_data.values():
+            if isinstance(v, list):
+                max_len = max(max_len, len(v))
             else:
-                print(f"   {nome_agente} ({tipo_agente}): sem dados de reward")
+                max_len = max(max_len, 1)
 
-        if metricas.get('steps'):
-            media_steps = sum(metricas['steps']) / len(metricas['steps'])
-            print(f"   Passos médios por episódio: {media_steps:.1f}")
+        # Normalizar para listas de comprimento max_len
+        norm = {}
+        for k, v in all_data.items():
+            if isinstance(v, list):
+                lst = v[:]
+            else:
+                lst = [v]
+            if len(lst) < max_len:
+                lst.extend([None] * (max_len - len(lst)))
+            norm[k] = lst
 
-        if metricas.get('success_rate'):
-            media_sucesso = sum(metricas['success_rate']) / len(metricas['success_rate'])
-            print(f"   Taxa média de sucesso: {media_sucesso:.2f}")
+        fieldnames = sorted(norm.keys())
 
-        if metricas.get('resources_delivered'):
-            print(f"   Recursos entregues (por episódio): {metricas['resources_delivered']}")
-
-        if extras:
-            print("\n   -- Extras exemplos:")
-            for chave, valor in extras.items():
-                print(f"     {chave}: {valor[:5]}")
-
-    def salva_csv(self, metricas, extras, filename='metrics.csv'):
-        """Guarda as métricas num ficheiro CSV."""
-        try:
-            if not metricas and not extras:
-                print("⚠️ Sem métricas para guardar.")
-                return
-
-            colunas = list(metricas.keys()) + list(extras.keys())
-            total_linhas = max(
-                [len(v) for v in metricas.values()] + [len(v) for v in extras.values()] or [0]
-            )
-
-            linhas = []
-            for i in range(total_linhas):
-                linha = {}
-                for chave in metricas:
-                    linha[chave] = metricas[chave][i] if i < len(metricas[chave]) else ''
-                for chave in extras:
-                    linha[chave] = extras[chave][i] if i < len(extras[chave]) else ''
-                linhas.append(linha)
-
-            with open(filename, 'w', newline='') as f:
-                writer = csv.DictWriter(f, fieldnames=colunas)
-                writer.writeheader()
-                for linha in linhas:
-                    writer.writerow(linha)
-
-            print(f"✅ Métricas guardadas em {filename}")
-        except Exception as erro:
-            print(f"⚠️ Erro ao salvar CSV: {erro}")
-
-    # ==================== MENUS INTERATIVOS ====================
-
-    def escolher_tipo_agente(self):
-        while True:
-            print("1. QAgent (learn)  2. FixedAgent  3. RandomAgent")
-            opcao = input("Escolha (1-3): ").strip()
-            if opcao == '1':
-                return 'QAgent'
-            if opcao == '2':
-                return 'FixedAgent'
-            if opcao == '3':
-                return 'RandomAgent'
-            print("Opção inválida")
-
-    def menu_farol(self):
-        print("\n🎯 CONFIGURAR FAROL")
-        try:
-            numero_agentes = int(input("Quantos agentes? (1-5): "))
-            numero_agentes = max(1, min(5, numero_agentes))
-            configuracao = []
-
-            for i in range(numero_agentes):
-                print(f"Configurar agente {i+1}:")
-                tipo = self.escolher_tipo_agente()
-                nome = input(f"Nome (default agente{i+1}): ").strip() or f"agente{i+1}"
-                configuracao.append((tipo, nome))
-
-            verbose = input("Mostrar logs? (s/N): ").lower().startswith('s')
-            render = input("Mostrar visualizacao? (S/n): ").lower() != 'n'
-
-            self.executar_simulacao('Farol', configuracao, verbose=verbose, render=render)
-        except Exception as erro:
-            print(f"Erro: {erro}")
-
-    def menu_foraging(self):
-        print("\n🍎 CONFIGURAR FORAGING")
-        try:
-            numero_agentes = int(input("Quantos agentes? (1-5): "))
-            numero_agentes = max(1, min(5, numero_agentes))
-            configuracao = []
-
-            for i in range(numero_agentes):
-                tipo = self.escolher_tipo_agente()
-                nome = input(f"Nome (default forager{i+1}): ").strip() or f"forager{i+1}"
-                configuracao.append((tipo, nome))
-
-            verbose = input("Mostrar logs? (s/N): ").lower().startswith('s')
-            render = input("Mostrar visualizacao? (S/n): ").lower() != 'n'
-
-            self.executar_simulacao('Foraging', configuracao, verbose=verbose, render=render)
-        except Exception as erro:
-            print(f"Erro: {erro}")
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for i in range(max_len):
+                row = {k: norm[k][i] for k in fieldnames}
+                writer.writerow(row)
 
     def menu_principal(self):
-        while True:
-            print('\n' + '=' * 50)
-            print('SIMULADOR INTERATIVO')
-            print('1. Farol  2. Foraging  3. Sair')
-            escolha = input('Escolha (1-3): ').strip()
+        """
+        Placeholder muito simples para um menu de consola.
+        Mantém compatibilidade com a versão anterior, mas aqui apenas
+        permite escolher rapidamente um ficheiro JSON.
+        """
+        print("=== Simulador Interativo ===")
+        print("1) Executar a partir de `farol.json`")
+        print("2) Executar a partir de `foraging.json`")
+        print("0) Sair")
 
-            if escolha == '1':
-                self.menu_farol()
-            elif escolha == '2':
-                self.menu_foraging()
-            elif escolha == '3':
-                break
-            else:
-                print('Opção inválida')
+        opcao = input("Opcao: ").strip()
+        if opcao == "1":
+            self.executarJson("farol.json")
+        elif opcao == "2":
+            self.executarJson("foraging.json")
+        else:
+            print("A sair...")
 
-    # ==================== MODO JSON ====================
 
-    def executarJson(self, arquivo_json):
-        try:
-            motor = MotorDeSimulacao.cria(arquivo_json)
+def quick_regression_tests():
+    """
+    Executa um pequeno conjunto de testes programáticos para:
+    - Farol com Q-learning em modo learn
+    - Farol em modo test com Q-table pré-treinada (sem alteração)
+    - Foraging com Q-learning em modo learn
 
-            render = motor.params.get("simulation", {}).get("render", False)
-            verbose = motor.params.get("simulation", {}).get("verbose", False)
+    Imprime métricas chave no stdout.
+    """
 
-            if render:
-                try:
-                    ambiente = motor.ambiente
-                    viz = self._criar_visualizador_para_ambiente(
-                        ambiente,
-                        titulo=motor.params.get("simulation", {}).get("title", "Simulacao")
-                    )
-                    motor.liga_visualizador(viz)
-                except Exception as e:
-                    print(f"⚠️ Não foi possível criar visualizador: {e}")
-                    render = False
+    print("=== REGRESSION TESTS: FAROL (LEARN) ===")
 
-            metricas, extras = motor.executa(render=render, verbose=verbose)
+    params_farol_learn = {
+        "problem": "Farol",
+        "episodes": 5,
+        "max_steps": 100,
+        "environment": {
+            "size": 7,
+            "max_steps": 100,
+            "farol_fixo": [3, 3],
+            "walls": [[2, 2], [2, 3]],
+        },
+        "agents": [
+            {
+                "id": "Q1",
+                "type": "QAgentFarol",
+                "mode": "learn",
+                "spawn": [0, 0],
+            }
+        ],
+        "simulation": {
+            "render": False,
+            "verbose": False,
+        },
+    }
 
-            if metricas:
-                self.salva_csv(metricas, extras, filename='metrics_from_json.csv')
+    motor_farol_learn = MotorDeSimulacao.cria(params_farol_learn)
+    metrics_f_learn, extras_f_learn = motor_farol_learn.executa(
+        render=False, verbose=False
+    )
+    ag_f_learn = motor_farol_learn.listaAgentes()[0]
 
-            print("✅ Simulação via JSON concluída")
-            return metricas, extras
-        except Exception as erro:
-            print(f"⚠️ Erro ao executar simulação JSON: {erro}")
-            return None, None
+    print("Farol learn -> rewards:", metrics_f_learn.get("reward_Q1"))
+    print("Farol learn -> success_rate:", metrics_f_learn.get("success_rate"))
+    print("Farol learn -> tracker dist_final_Q1:", extras_f_learn.get("dist_final_Q1"))
+    print("Farol learn -> agent internal metrics:", ag_f_learn.get_metrics())
+
+    qt_path = "q_farol_regtest.pkl"
+    ag_f_learn.save_qtable(qt_path)
+
+    print("\n=== REGRESSION TESTS: FAROL (TEST MODE, FIXED POLICY) ===")
+
+    params_farol_test = copy.deepcopy(params_farol_learn)
+    params_farol_test["agents"][0]["mode"] = "test"
+
+    motor_farol_test = MotorDeSimulacao.cria(params_farol_test)
+    ag_f_test = motor_farol_test.listaAgentes()[0]
+
+    # Carregar Q-table treinada
+    with open(qt_path, "rb") as f:
+        q_before = pickle.load(f)
+    ag_f_test.load_qtable(qt_path)
+
+    metrics_f_test, extras_f_test = motor_farol_test.executa(
+        render=False, verbose=False
+    )
+    q_after = ag_f_test.qtable
+
+    print("Farol test -> rewards:", metrics_f_test.get("reward_Q1"))
+    print("Farol test -> success_rate:", metrics_f_test.get("success_rate"))
+    print("Farol test -> tracker dist_final_Q1:", extras_f_test.get("dist_final_Q1"))
+    print("Farol test -> agent internal metrics:", ag_f_test.get_metrics())
+    print("Farol test -> Q-table changed in test mode?", q_before != q_after)
+
+    if os.path.exists(qt_path):
+        os.remove(qt_path)
+
+    print("\n=== REGRESSION TESTS: FORAGING (LEARN) ===")
+
+    params_foraging_learn = {
+        "problem": "Foraging",
+        "episodes": 5,
+        "max_steps": 150,
+        "environment": {
+            "width": 7,
+            "height": 7,
+            "n_resources": 10,
+            "ninho": [0, 0],
+            "max_steps": 150,
+            "walls": [[3, 3], [3, 4]],
+        },
+        "agents": [
+            {
+                "id": "QF1",
+                "type": "QAgentForaging",
+                "mode": "learn",
+                "spawn": [0, 0],
+            }
+        ],
+        "simulation": {
+            "render": False,
+            "verbose": False,
+        },
+    }
+
+    motor_foraging = MotorDeSimulacao.cria(params_foraging_learn)
+    metrics_fg, extras_fg = motor_foraging.executa(render=False, verbose=False)
+    ag_fg = motor_foraging.listaAgentes()[0]
+
+    print("Foraging learn -> rewards:", metrics_fg.get("reward_QF1"))
+    print(
+        "Foraging learn -> resources_delivered:",
+        metrics_fg.get("resources_delivered"),
+    )
+    print(
+        "Foraging learn -> tracker resources_delivered:",
+        extras_fg.get("resources_delivered"),
+    )
+    print("Foraging learn -> agent internal metrics:", ag_fg.get_metrics())
 
 
 def main():
+    """
+    Ponto de entrada principal.
+
+    Durante desenvolvimento pode ser útil chamar quick_regression_tests()
+    em vez do modo interativo JSON.
+    """
+    # --- modo testes rápidos (Farol + Foraging) ---
+    # quick_regression_tests()
+
+    # --- modo interativo/JSON (como no código original) ---
     simulador = SimuladorInterativo()
     try:
-        # modo JSON (para testar visualizador com farol.json)
-        simulador.executarJson('foraging.json')
+        # Exemplo: executar diretamente um ficheiro JSON
+        # (altere para `farol.json` ou use o menu_principal)
+        simulador.executarJson("foraging.json")
 
-        # ou modo menus:
+        # ou:
         # simulador.menu_principal()
     except KeyboardInterrupt:
-        print('\nInterrompido pelo utilizador')
+        print("\nInterrompido pelo utilizador")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
