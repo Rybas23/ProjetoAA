@@ -11,12 +11,15 @@ def policy_farol_inteligente(observacao):
         'N': 'UP',
         'S': 'DOWN',
         'E': 'RIGHT',
-        'O': 'LEFT',
-        'NONE': 'STAY'
+        'O': 'LEFT'
     }
 
-    # Retorna a ação correspondente ou STAY se nada reconhecido
-    return mapa_acao_por_direcao.get(direcao_do_farol, 'STAY')
+    # Se a direção for conhecida, seguimos diretamente.
+    if direcao_do_farol in mapa_acao_por_direcao:
+        return mapa_acao_por_direcao[direcao_do_farol]
+
+    # Caso contrário (NONE ou desconhecido), escolhemos um movimento aleatório.
+    return random.choice(['UP', 'DOWN', 'LEFT', 'RIGHT'])
 
 
 # Política inteligente para Foraging (colheita)
@@ -68,4 +71,4 @@ def policy_foraging_inteligente(observacao):
 
 # Política completamente aleatória → sem inteligência
 def policy_aleatoria(observacao):
-    return random.choice(['UP', 'DOWN', 'LEFT', 'RIGHT', 'STAY'])
+    return random.choice(['UP', 'DOWN', 'LEFT', 'RIGHT'])

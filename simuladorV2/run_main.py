@@ -1,12 +1,10 @@
-import random, time, csv
+import csv
 from engine import MotorDeSimulacao
 from ambiente_farol import FarolEnv
 from ambiente_foraging import ForagingEnv
 
-# IMPORTAÇÃO CORRETA DOS AGENTES
 from agentes import QAgentFarol, QAgentForaging, FixedAgent
-
-from sensors import SensorVisao, SensorFarol, SensorNinho
+from sensors import SensorVisao, SensorFarol, SensorNinho,SensorCarregando
 from policies import (
     policy_farol_inteligente,
     policy_foraging_inteligente,
@@ -17,157 +15,176 @@ from visualizador import Visualizador
 
 class SimuladorInterativo:
     """
-    Classe principal que gere a criação dos ambientes,
-    agentes, simulação, visualização e exportação de métricas.
+    Gere:
+    \- criação de ambientes e agentes
+    \- execução de simulações (interativo ou via JSON)
+    \- visualização em consola
+    \- exportação de métricas
     """
 
     def __init__(self):
-        # Parâmetros base usados em todos os cenários
         self.parametros_base = {
             'episodes': 5,
             'max_steps': 100,
             'render_delay': 0.05
         }
 
-    # CRIAÇÃO CORRETA DO AGENTE DEPENDENDO DO PROBLEMA ESCOLHIDO
-    def criar_agente(self, tipo_agente, identificador, problema, verbose=False):
-        """
-        Cria um agente adaptado ao tipo de ambiente:
-        - Farol → QAgentFarol
-        - Foraging → QAgentForaging
-        Instala automaticamente os sensores adequados.
-        """
+    # ==================== FÁBRICAS BÁSICAS ====================
 
-        # -------------------- FAROL --------------------
+    def _criar_ambiente(self, problema, tamanho=10):
+        """Cria ambiente Farol ou Foraging com defaults razoáveis."""
         if problema == "Farol":
-            if tipo_agente == "QAgent":
-                agente = QAgentFarol(
-                    id=identificador,
-                    actions=['UP', 'DOWN', 'LEFT', 'RIGHT', 'STAY'],
-                    modo='learn'
-                )
-            elif tipo_agente == "FixedAgent":
-                agente = FixedAgent(
-                    id=identificador,
-                    policy=policy_farol_inteligente,
-                    modo='test'
-                )
-            else:
-                agente = FixedAgent(
-                    id=identificador,
-                    policy=policy_aleatoria,
-                    modo='test'
-                )
-
-            # Instala sensores adequados ao Farol
-            agente.instala(SensorVisao(alcance=1))
-            agente.instala(SensorFarol())
-
-        # -------------------- FORAGING --------------------
-        else:
-            if tipo_agente == "QAgent":
-                agente = QAgentForaging(
-                    id=identificador,
-                    actions=['UP', 'DOWN', 'LEFT', 'RIGHT', 'PICK', 'DROP', 'STAY'],
-                    modo='learn'
-                )
-            elif tipo_agente == "FixedAgent":
-                agente = FixedAgent(
-                    id=identificador,
-                    policy=policy_foraging_inteligente,
-                    modo='test'
-                )
-            else:
-                agente = FixedAgent(
-                    id=identificador,
-                    policy=policy_aleatoria,
-                    modo='test'
-                )
-
-            # Instala sensores usados no Foraging
-            agente.instala(SensorVisao(alcance=2))
-            agente.instala(SensorNinho())
-
-        agente.verbose = verbose
-        return agente
-
-    # CRIAÇÃO DO AMBIENTE ADEQUADO
-    def criar_ambiente(self, problema, tamanho=10):
-        if problema == "Farol": #Farol
             return FarolEnv(
                 size=tamanho,
                 farol_fixo=(tamanho // 2, tamanho // 2),
                 max_steps=self.parametros_base['max_steps']
             )
-        else:                   #Foraging
-            return ForagingEnv(
-                width=tamanho,
-                height=tamanho,
-                n_resources=tamanho * 2,
-                nest=(0, 0),
-                max_steps=self.parametros_base['max_steps']
+
+        # Foraging
+        return ForagingEnv(
+            width=tamanho,
+            height=tamanho,
+            n_resources=tamanho * 2,
+            ninho=(0, 0),
+            max_steps=self.parametros_base['max_steps']
+        )
+
+    def _criar_agente_farol(self, tipo, identificador, verbose=False):
+        """Cria um agente adequado ao ambiente Farol."""
+        if tipo == "QAgent":
+            agente = QAgentFarol(
+                id=identificador,
+                lista_acoes=['UP', 'DOWN', 'LEFT', 'RIGHT'],
+                modo='learn'
+            )
+        elif tipo == "FixedAgent":
+            agente = FixedAgent(
+                id=identificador,
+                politica=policy_farol_inteligente,
+                modo='test'
+            )
+        else:  # RandomAgent
+            agente = FixedAgent(
+                id=identificador,
+                politica=policy_aleatoria,
+                modo='test'
             )
 
-    # EXECUÇÃO COMPLETA DA SIMULAÇÃO
-    def executar_simulacao(self, problema, configuracao_agentes, verbose=True, render=True):
+        agente.instala(SensorVisao(alcance=1))
+        agente.instala(SensorFarol())
+        agente.verbose = verbose
+        return agente
 
-        ambiente = self.criar_ambiente(problema)
-        lista_agentes = []
+    def _criar_agente_foraging(self, tipo, identificador, verbose=False):
+        """Cria um agente adequado ao ambiente Foraging."""
+        if tipo == "QAgent":
+            agente = QAgentForaging(
+                id=identificador,
+                lista_acoes=['UP', 'DOWN', 'LEFT', 'RIGHT', 'PICK', 'DROP'],
+                modo='learn'
+            )
+        elif tipo == "FixedAgent":
+            agente = FixedAgent(
+                id=identificador,
+                politica=policy_foraging_inteligente,
+                modo='test'
+            )
+        else:  # RandomAgent
+            agente = FixedAgent(
+                id=identificador,
+                politica=policy_aleatoria,
+                modo='test'
+            )
 
-        # Criar cada agente configurado
-        for tipo_agente, nome_agente in configuracao_agentes:
-            agente = self.criar_agente(tipo_agente, nome_agente, problema, verbose)
-            lista_agentes.append(agente)
+        agente.instala(SensorVisao(alcance=2))
+        agente.instala(SensorNinho())
+        agente.instala(SensorCarregando())
+        agente.verbose = verbose
+        return agente
 
-        parametros = self.parametros_base.copy()
-        motor = MotorDeSimulacao.cria(parametros)
+    def criar_agente(self, tipo_agente, identificador, problema, verbose=False):
+        """Wrapper público que delega para as fábricas específicas."""
+        if problema == "Farol":
+            return self._criar_agente_farol(tipo_agente, identificador, verbose)
+        return self._criar_agente_foraging(tipo_agente, identificador, verbose)
+
+    def _criar_visualizador_para_ambiente(self, ambiente, titulo="Simulacao"):
+        """Cria `Visualizador` adaptado a FarolEnv ou ForagingEnv."""
+        largura = getattr(ambiente, 'width', getattr(ambiente, 'size', 10))
+        altura = getattr(ambiente, 'height', getattr(ambiente, 'size', 10))
+        return Visualizador(
+            largura,
+            altura,
+            title=titulo,
+            fps=5
+        )
+
+    # ==================== EXECUÇÃO GENÉRICA ====================
+
+    def executar_simulacao(self, problema, configuracao_agentes,
+                            verbose=True, render=True, tamanho=10):
+        """
+        Executa simulação configurada via menus (não JSON).
+        `configuracao_agentes`: lista de tuplos (tipo, nome).
+        """
+
+        # 1\) Criar ambiente e agentes
+        ambiente = self._criar_ambiente(problema, tamanho)
+        lista_agentes = [
+            self.criar_agente(tipo, nome, problema, verbose)
+            for tipo, nome in configuracao_agentes
+        ]
+
+        # 2\) Construir parametros para o motor no formato esperado
+        params_motor = {
+            "problem": problema,
+            "environment": {},
+            "simulation": {
+                "episodes": self.parametros_base['episodes'],
+                "render_delay": self.parametros_base['render_delay'],
+                "verbose": verbose,
+                "render": render
+            },
+            "agents": []  # não é usado neste caminho, pois adicionamos manualmente
+        }
+
+        motor = MotorDeSimulacao.cria(params_motor)
         motor.adiciona_ambiente(ambiente)
 
         for ag in lista_agentes:
             motor.adiciona_agente(ag)
 
-        # Criar visualizador (se possível)
+        # 3\) Visualizador
         if render:
             try:
-                if hasattr(ambiente, 'size'):
-                    visualizador = Visualizador(
-                        ambiente.size,
-                        ambiente.size,
-                        title=problema,
-                        fps=5
-                    )
-                else:
-                    visualizador = Visualizador(
-                        ambiente.width,
-                        ambiente.height,
-                        title=problema,
-                        fps=5
-                    )
-                motor.liga_visualizador(visualizador)
-            except Exception:
-                visualizador = None
+                viz = self._criar_visualizador_para_ambiente(
+                    ambiente,
+                    titulo=f"{problema}"
+                )
+                motor.liga_visualizador(viz)
+            except Exception as e:
+                print(f"⚠️ Não foi possível criar visualizador: {e}")
 
-        # ---- Informações iniciais ----
+        # 4\) Logs iniciais
         print(f"\n🎮 INICIANDO SIMULAÇÃO: {problema}")
         print(f"   Agentes: {', '.join([f'{nome} ({tipo})' for tipo, nome in configuracao_agentes])}")
-        print(f"   Episódios: {parametros['episodes']} | Passos máximos: {parametros['max_steps']}")
+        print(f"   Episódios: {self.parametros_base['episodes']} | Passos máximos: {self.parametros_base['max_steps']}")
         print('=' * 60)
 
-        # Executa o motor
+        # 5\) Executar motor
         metricas, extras = motor.executa(render=render, verbose=verbose)
 
         self.mostrar_resumo(metricas, extras, configuracao_agentes)
         self.salva_csv(metricas, extras, filename=f'metrics_{problema}.csv')
-
         return metricas, extras
 
-    # MOSTRAR RESUMO DE RESULTADOS
+    # ==================== RESUMO E CSV ====================
+
     def mostrar_resumo(self, metricas, extras, configuracao_agentes):
         print("\n📊 RESUMO FINAL DA SIMULAÇÃO")
         print("=" * 50)
         print(f"🔍 Chaves nas métricas: {list(metricas.keys())}  | extras: {list(extras.keys())}")
 
-        # Mostrar reward médio de cada agente
         for tipo_agente, nome_agente in configuracao_agentes:
             chave_reward = f'reward_{nome_agente}'
             valores = metricas.get(chave_reward) or []
@@ -177,30 +194,35 @@ class SimuladorInterativo:
             else:
                 print(f"   {nome_agente} ({tipo_agente}): sem dados de reward")
 
-        # Outras métricas globais
-        if 'steps' in metricas and metricas['steps']:
-            print(f"   Passos médios por episódio: {sum(metricas['steps']) / len(metricas['steps']):.1f}")
+        if metricas.get('steps'):
+            media_steps = sum(metricas['steps']) / len(metricas['steps'])
+            print(f"   Passos médios por episódio: {media_steps:.1f}")
 
-        if 'success_rate' in metricas and metricas['success_rate']:
-            print(f"   Taxa média de sucesso: {sum(metricas['success_rate']) / len(metricas['success_rate']):.2f}")
+        if metricas.get('success_rate'):
+            media_sucesso = sum(metricas['success_rate']) / len(metricas['success_rate'])
+            print(f"   Taxa média de sucesso: {media_sucesso:.2f}")
 
-        if 'resources_delivered' in metricas and metricas['resources_delivered']:
-            print(f"   Recursos entregues (últimos episódios): {metricas['resources_delivered']}")
+        if metricas.get('resources_delivered'):
+            print(f"   Recursos entregues (por episódio): {metricas['resources_delivered']}")
 
-        # Mostrar primeiros valores de extras
         if extras:
             print("\n   -- Extras exemplos:")
             for chave, valor in extras.items():
                 print(f"     {chave}: {valor[:5]}")
 
-    # EXPORTAÇÃO DAS MÉTRICAS PARA CSV
     def salva_csv(self, metricas, extras, filename='metrics.csv'):
         """Guarda as métricas num ficheiro CSV."""
         try:
-            linhas = []
-            total_linhas = max(len(v) for v in metricas.values()) if metricas else 0
-            colunas = list(metricas.keys()) + list(extras.keys())
+            if not metricas and not extras:
+                print("⚠️ Sem métricas para guardar.")
+                return
 
+            colunas = list(metricas.keys()) + list(extras.keys())
+            total_linhas = max(
+                [len(v) for v in metricas.values()] + [len(v) for v in extras.values()] or [0]
+            )
+
+            linhas = []
             for i in range(total_linhas):
                 linha = {}
                 for chave in metricas:
@@ -216,23 +238,24 @@ class SimuladorInterativo:
                     writer.writerow(linha)
 
             print(f"✅ Métricas guardadas em {filename}")
-
         except Exception as erro:
             print(f"⚠️ Erro ao salvar CSV: {erro}")
 
-    # MENUS INTERATIVOS
+    # ==================== MENUS INTERATIVOS ====================
+
     def escolher_tipo_agente(self):
-        """Menu para escolher tipo de agente."""
         while True:
             print("1. QAgent (learn)  2. FixedAgent  3. RandomAgent")
             opcao = input("Escolha (1-3): ").strip()
-            if opcao == '1': return 'QAgent'
-            if opcao == '2': return 'FixedAgent'
-            if opcao == '3': return 'RandomAgent'
+            if opcao == '1':
+                return 'QAgent'
+            if opcao == '2':
+                return 'FixedAgent'
+            if opcao == '3':
+                return 'RandomAgent'
             print("Opção inválida")
 
     def menu_farol(self):
-        """Menu de configuração do problema Farol."""
         print("\n🎯 CONFIGURAR FAROL")
         try:
             numero_agentes = int(input("Quantos agentes? (1-5): "))
@@ -249,12 +272,10 @@ class SimuladorInterativo:
             render = input("Mostrar visualizacao? (S/n): ").lower() != 'n'
 
             self.executar_simulacao('Farol', configuracao, verbose=verbose, render=render)
-
         except Exception as erro:
             print(f"Erro: {erro}")
 
     def menu_foraging(self):
-        """Menu de configuração do problema Foraging."""
         print("\n🍎 CONFIGURAR FORAGING")
         try:
             numero_agentes = int(input("Quantos agentes? (1-5): "))
@@ -270,36 +291,66 @@ class SimuladorInterativo:
             render = input("Mostrar visualizacao? (S/n): ").lower() != 'n'
 
             self.executar_simulacao('Foraging', configuracao, verbose=verbose, render=render)
-
         except Exception as erro:
             print(f"Erro: {erro}")
 
-    def executar_exemplo_rapido(self):
-        """Executa um exemplo rápido pré-configurado."""
-        print("\n🚀 EXEMPLO RÁPIDO: Farol 2 agentes (Q + Fixed)")
-        configuracao = [('QAgent', 'q1'), ('FixedAgent', 'fix1')]
-        input("Pressione Enter para iniciar...")
-        self.executar_simulacao('Farol', configuracao, verbose=True, render=True)
-
     def menu_principal(self):
-        """Menu principal do programa."""
         while True:
             print('\n' + '=' * 50)
             print('SIMULADOR INTERATIVO')
-            print('1. Farol  2. Foraging  3. Exemplo rapido  4. Sair')
-            escolha = input('Escolha (1-4): ').strip()
+            print('1. Farol  2. Foraging  3. Sair')
+            escolha = input('Escolha (1-3): ').strip()
 
-            if escolha == '1': self.menu_farol()
-            elif escolha == '2': self.menu_foraging()
-            elif escolha == '3': self.executar_exemplo_rapido()
-            elif escolha == '4': break
-            else: print('Opção inválida')
+            if escolha == '1':
+                self.menu_farol()
+            elif escolha == '2':
+                self.menu_foraging()
+            elif escolha == '3':
+                break
+            else:
+                print('Opção inválida')
+
+    # ==================== MODO JSON ====================
+
+    def executarJson(self, arquivo_json):
+        try:
+            motor = MotorDeSimulacao.cria(arquivo_json)
+
+            render = motor.params.get("simulation", {}).get("render", False)
+            verbose = motor.params.get("simulation", {}).get("verbose", False)
+
+            if render:
+                try:
+                    ambiente = motor.ambiente
+                    viz = self._criar_visualizador_para_ambiente(
+                        ambiente,
+                        titulo=motor.params.get("simulation", {}).get("title", "Simulacao")
+                    )
+                    motor.liga_visualizador(viz)
+                except Exception as e:
+                    print(f"⚠️ Não foi possível criar visualizador: {e}")
+                    render = False
+
+            metricas, extras = motor.executa(render=render, verbose=verbose)
+
+            if metricas:
+                self.salva_csv(metricas, extras, filename='metrics_from_json.csv')
+
+            print("✅ Simulação via JSON concluída")
+            return metricas, extras
+        except Exception as erro:
+            print(f"⚠️ Erro ao executar simulação JSON: {erro}")
+            return None, None
 
 
 def main():
     simulador = SimuladorInterativo()
     try:
-        simulador.menu_principal()
+        # modo JSON (para testar visualizador com farol.json)
+        simulador.executarJson('foraging.json')
+
+        # ou modo menus:
+        # simulador.menu_principal()
     except KeyboardInterrupt:
         print('\nInterrompido pelo utilizador')
 

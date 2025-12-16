@@ -1,0 +1,35 @@
+{
+  "problem": "Foraging",
+
+  "environment": {
+    "width": 10,
+    "height": 10,
+    "n_resources": 15,
+    "ninho": [0, 0],
+    "max_steps": 200,
+    "walls": [
+      [3, 1], [6, 1],
+      [2, 3], [7, 3],
+      [1, 5], [4, 5], [8, 5],
+      [2, 7], [5, 7],
+      [3, 8], [6, 8]
+    ]
+  },
+
+  "simulation": {
+    "episodes": 50,
+    "render_delay": 0.05,
+    "verbose": true,
+    "render": true
+  },
+
+  "agents": [
+    {
+      "type": "QAgentForaging",
+      "id": "q1",
+      "mode": "learn",
+      "spawn": [0, 0]
+    }
+  ]
+}
+

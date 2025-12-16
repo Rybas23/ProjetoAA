@@ -48,7 +48,8 @@ class FixedAgent(AgenteBase):
 
     @classmethod
     def cria(cls, p):
-        return cls('fixed', lambda o: 'STAY')
+        # Por omissão, usar uma política que se move sempre 'UP'
+        return cls('fixed', lambda o: 'UP')
 
     def age(self):
         return self.politica(self.ultima_observacao or {})
@@ -156,7 +157,7 @@ class QAgentFarol(QAgentBase):
         # Ações válidas no ambiente Farol
         return cls(
             id='q_farol',
-            lista_acoes=['UP', 'DOWN', 'LEFT', 'RIGHT', 'STAY']
+            lista_acoes=['UP', 'DOWN', 'LEFT', 'RIGHT']
         )
 
     def _to_state(self, observacao):
@@ -189,7 +190,7 @@ class QAgentForaging(QAgentBase):
     def cria(cls, p):
         return cls(
             id='q_forage',
-            lista_acoes=['UP', 'DOWN', 'LEFT', 'RIGHT', 'PICK', 'DROP', 'STAY']
+            lista_acoes=['UP', 'DOWN', 'LEFT', 'RIGHT', 'PICK', 'DROP']
         )
 
     def _to_state(self, observacao):

@@ -1,159 +1,158 @@
-try:
-    import pygame, sys
-    PYGAME_AVAILABLE = True
-except Exception:
-    # Caso o pygame não esteja disponível, a simulação ainda funciona mas sem visualização
-    PYGAME_AVAILABLE = False
+import time
+import tkinter as tk
+from tkinter import scrolledtext
 
 
-# Classe Visualizador
-# Renderiza ambientes de Foraging e Farol usando pygame (quando disponível)
 class Visualizador:
+    # Símbolos para visualização
+    SYMBOLS = {
+        'empty': '.',
+        'wall': 'W',
+        'resource': 'R',
+        'ninho': 'N',
+        'farol': 'F'
+    }
+
     def __init__(self, grid_width, grid_height, title="Ambiente", fps=5, cell_size=40):
-        # Dimensões da grelha
         self.width = grid_width
         self.height = grid_height
-        self.cell_size = cell_size
-
-        # Velocidade de renderização
         self.fps = fps
-
-        # Estado de execução
         self.running = True
+        self.title = title
 
-        # Dicionário de cores por agente
-        self.colors = {}
+        # Componentes Tkinter (lazy init)
+        self._root = None
+        self._text = None
 
-        # Conjunto de cores pré-definidas para agentes
-        self.default_colors = [
-            (255, 0, 0), (0, 255, 0), (0, 0, 255),
-            (255, 255, 0), (255, 0, 255), (0, 255, 255),
-            (128, 128, 128), (255, 165, 0)
-        ]
+    # ==================== TKINTER SETUP ====================
 
-        # Inicialização do pygame (se disponível)
-        if PYGAME_AVAILABLE:
-            if not pygame.get_init():
-                pygame.init()
+    def _init_tk(self):
+        """Inicializa a janela Tkinter apenas uma vez."""
+        if self._root is not None:
+            return
 
-            # Criar janela
-            janela_largura = self.width * self.cell_size
-            janela_altura = self.height * self.cell_size
-            self.screen = pygame.display.set_mode((janela_largura, janela_altura))
-            pygame.display.set_caption(title)
+        self._root = tk.Tk()
+        self._root.title(self.title)
 
-            # Relógio para controlar FPS
-            self.clock = pygame.time.Clock()
-        else:
-            self.screen = None
+        # Caixa de texto tipo consola
+        self._text = scrolledtext.ScrolledText(
+            self._root,
+            width=self.width + 4,   # margem para bordas
+            height=self.height + 4,  # margem
+            font=("Consolas", 12)
+        )
+        self._text.pack(fill=tk.BOTH, expand=True)
 
-    # Atribui uma cor distinta a cada agente
-    def assign_colors(self, agents):
-        for index, agent_id in enumerate(agents.keys()):
-            self.colors[agent_id] = self.default_colors[index % len(self.default_colors)]
+        # Impedir edição pelo utilizador
+        self._text.config(state=tk.DISABLED)
 
-    # Processa eventos do pygame (fechar janela, etc.)
-    def check_events(self):
-        if not PYGAME_AVAILABLE:
-            return True  # Sem pygame → nada para tratar
+        # Quando o utilizador fecha a janela, parámos o rendering
+        def on_close():
+            self.running = False
+            self._root.destroy()
+            self._root = None
 
-        for event in __import__('pygame').event.get():
-            if event.type == __import__('pygame').QUIT:
-                self.running = False
-                __import__('pygame').quit()
+        self._root.protocol("WM_DELETE_WINDOW", on_close)
 
-                # Tentar encerrar execução sem crash
-                try:
-                    sys.exit()
-                except SystemExit:
-                    pass
+    # ==================== LÓGICA DE GRELHA ====================
 
-        return self.running
+    def _create_empty_grid(self):
+        return [[self.SYMBOLS['empty'] for _ in range(self.width)]
+                for _ in range(self.height)]
 
-    # Função base para desenhar ambiente (recursos, agentes, alvos)
-    def draw_grid(self, resources, agents, ninho=None, farol=None):
-        if not PYGAME_AVAILABLE:
-            return True  # Sem pygame → ignora desenho
+    def _is_valid_position(self, x, y):
+        return 0 <= x < self.width and 0 <= y < self.height
 
-        import pygame
+    def _place_on_grid(self, grid, x, y, symbol):
+        if self._is_valid_position(x, y):
+            grid[y][x] = symbol
 
-        if not self.check_events():
+    def _draw_elements(self, grid, elements, symbol):
+        if not elements:
+            return
+        for pos in elements:
+            if isinstance(pos, tuple) and len(pos) == 2:
+                x, y = pos
+                self._place_on_grid(grid, x, y, symbol)
+
+    def _draw_single_element(self, grid, position, symbol):
+        if position and isinstance(position, tuple) and len(position) == 2:
+            x, y = position
+            self._place_on_grid(grid, x, y, symbol)
+
+    def _draw_agents(self, grid, agents):
+        for agent_id, (x, y) in agents.items():
+            if self._is_valid_position(x, y):
+                symbol = str(agent_id)[0].upper()
+                grid[y][x] = symbol
+
+    # ==================== RENDER NA JANELA ====================
+
+    def _print_grid(self, grid, agents):
+        """Atualiza a janela Tkinter com o conteúdo ASCII."""
+
+        # Garante que a janela existe
+        self._init_tk()
+        if self._root is None or self._text is None:
+            return
+
+        # Montar o texto em memória (string única)
+        lines = []
+        lines.append(f"=== {self.title} ===")
+        lines.append("+" + "-" * self.width + "+")
+        for row in grid:
+            lines.append("|" + "".join(row) + "|")
+        lines.append("+" + "-" * self.width + "+")
+
+
+        full_text = "\n".join(lines)
+
+        # Atualizar widget de texto
+        self._text.config(state=tk.NORMAL)
+        self._text.delete("1.0", tk.END)
+        self._text.insert(tk.END, full_text)
+        self._text.config(state=tk.DISABLED)
+
+        # Atualizar a janela (não bloqueante)
+        self._root.update_idletasks()
+        self._root.update()
+
+        # Desacelerar de acordo com fps (frames por segundo)
+        if self.fps > 0:
+            time.sleep(1.0 / self.fps)
+
+    # ==================== API PÚBLICA ====================
+
+    def draw_grid(self, resources, agents, ninho=None, farol=None, walls=None):
+        if not self.running:
             return False
 
-        # Fundo branco
-        self.screen.fill((255, 255, 255))
+        grid = self._create_empty_grid()
 
-        # Desenhar recursos (foraging)
-        for (x, y), quantidade in resources.items():
-            if 0 <= x < self.width and 0 <= y < self.height:
-                pygame.draw.rect(
-                    self.screen,
-                    (139, 69, 19),  # castanho (terra)
-                    (x * self.cell_size, y * self.cell_size, self.cell_size, self.cell_size)
-                )
+        # Ordem de desenho
+        self._draw_elements(grid, walls, self.SYMBOLS['wall'])
+        self._draw_elements(grid, resources.keys(), self.SYMBOLS['resource'])
+        self._draw_single_element(grid, ninho, self.SYMBOLS['ninho'])
+        self._draw_single_element(grid, farol, self.SYMBOLS['farol'])
+        self._draw_agents(grid, agents)
 
-        # Desenhar ninho (foraging)
-        if ninho:
-            nx, ny = ninho
-            pygame.draw.rect(
-                self.screen,
-                (0, 128, 0),  # verde escuro
-                (nx * self.cell_size, ny * self.cell_size, self.cell_size, self.cell_size),
-                2
-            )
-
-        # Desenhar farol (ambiente Farol)
-        if farol:
-            tx, ty = farol
-            pygame.draw.rect(
-                self.screen,
-                (255, 0, 0),  # vermelho
-                (tx * self.cell_size, ty * self.cell_size, self.cell_size, self.cell_size),
-                2
-            )
-
-        # Desenhar agentes (círculos coloridos)
-        for agent_id, (x, y) in agents.items():
-            color = self.colors.get(agent_id, (0, 0, 0))
-            pygame.draw.circle(
-                self.screen,
-                color,
-                (x * self.cell_size + self.cell_size // 2,
-                 y * self.cell_size + self.cell_size // 2),
-                self.cell_size // 3
-            )
-
-        pygame.display.flip()
-        self.clock.tick(self.fps)
+        self._print_grid(grid, agents)
         return True
 
-    # Desenhar de acordo com o tipo de ambiente
     def draw(self, ambiente):
-        # Ambiente de foraging → tem resources
-        if hasattr(ambiente, 'resources'):
-            recursos = ambiente.resources
-            agentes = ambiente.agent_pos
-            ninho = ambiente.ninho
+        recursos = getattr(ambiente, 'resources', {})
+        agentes = ambiente.agent_pos
+        ninho = getattr(ambiente, 'ninho', None)
+        farol = getattr(ambiente, 'farol', None)
+        walls = getattr(ambiente, 'walls', None)  # funciona para Farol e Foraging
 
-            if agentes and not self.colors:
-                self.assign_colors(agentes)
+        return self.draw_grid(recursos, agentes, ninho=ninho, farol=farol, walls=walls)
 
-            return self.draw_grid(recursos, agentes, ninho=ninho)
+    def check_events(self):
+        return self.running
 
-        # Ambiente Farol → tem farol (farol)
-        else:
-            recursos = {}
-            agentes = ambiente.agent_pos
-            farol = ambiente.farol
-
-            if agentes and not self.colors:
-                self.assign_colors(agentes)
-
-            return self.draw_grid(recursos, agentes, farol=farol)
-
-    # Limpeza final do pygame
     def cleanup(self):
-        if PYGAME_AVAILABLE:
-            import pygame
-            if pygame.get_init():
-                pygame.quit()
+        if self._root is not None:
+            self._root.destroy()
+            self._root = None
+        self.running = False

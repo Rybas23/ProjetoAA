@@ -1,0 +1,46 @@
+{
+  "problem": "Farol",
+
+  "environment": {
+    "size": 10,
+    "max_steps": 100,
+    "farol_fixo": [5, 5],
+    "walls": [
+      [1, 1],
+      [3, 1],
+      [6, 1],
+
+      [2, 3],
+      [5, 3],
+      [8, 3],
+
+      [1, 5],
+      [4, 5],
+      [7, 5],
+
+      [2, 7],
+      [5, 7],
+      [8, 7],
+
+      [3, 8],
+      [6, 8]
+
+    ]
+  },
+
+  "simulation": {
+    "episodes": 50,
+    "render_delay": 0.05,
+    "verbose": true,
+    "render": true
+  },
+
+  "agents": [
+    {
+      "type": "QAgentFarol",
+      "id": "q1",
+      "mode": "learn",
+      "spawn": [0, 0]
+    }
+  ]
+}

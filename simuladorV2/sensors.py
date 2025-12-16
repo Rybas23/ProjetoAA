@@ -29,3 +29,9 @@ class SensorFarol(Sensor):
 class SensorNinho(Sensor):
     def __init__(self):
         super().__init__('ninho', 0)
+
+
+# Sensor utilizado no Foraging para saber se o agente está a carregar recurso
+class SensorCarregando(Sensor):
+    def __init__(self):
+        super().__init__('carregando', 0)

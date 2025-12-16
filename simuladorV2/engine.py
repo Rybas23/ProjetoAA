@@ -16,6 +16,8 @@ class MotorDeSimulacao:
         self.metrics = defaultdict(list)   # métricas registadas
         self.visualizador = None           # objeto visualizador opcional
         self.tracker = None                # rastreador de métricas detalhadas
+        # Novo: mapa de spawns iniciais por id de agente
+        self.agent_spawns = {}
 
     # Inicializar lendo ficheiro JSON
     @classmethod
@@ -24,7 +26,91 @@ class MotorDeSimulacao:
             import json
             with open(params, 'r') as f:
                 params = json.load(f)
-        return cls(params)
+
+        motor = cls(params)
+
+        # ---------- CRIAR AMBIENTE ----------
+        problem = params.get("problem")
+
+        env_cfg = params.get("environment", {})
+
+        if problem == "Farol":
+            from ambiente_farol import FarolEnv
+            ambiente = FarolEnv(
+                size=env_cfg.get("size", 10),
+                max_steps=env_cfg.get("max_steps", 200),
+                farol_fixo=tuple(env_cfg.get("farol_fixo", None)),
+                paredes=[tuple(p) for p in env_cfg.get("walls", [])]
+            )
+
+        elif problem == "Foraging":
+            from ambiente_foraging import ForagingEnv
+            ambiente = ForagingEnv(
+                width=env_cfg.get("width", 10),
+                height=env_cfg.get("height", 10),
+                n_resources=env_cfg.get("n_resources", 10),
+                ninho=tuple(env_cfg.get("ninho", (0, 0))),
+                max_steps=env_cfg.get("max_steps", 200),
+                paredes=[tuple(p) for p in env_cfg.get("walls", [])]
+            )
+        else:
+            raise ValueError("Problema desconhecido no JSON")
+
+        motor.adiciona_ambiente(ambiente)
+
+        # ---------- CRIAR AGENTES ----------
+        from agentes import QAgentFarol, QAgentForaging, FixedAgent
+        from sensors import SensorVisao, SensorFarol, SensorNinho
+        from policies import (
+            policy_farol_inteligente,
+            policy_foraging_inteligente,
+            policy_aleatoria
+        )
+
+        for ag_cfg in params.get("agents", []):
+
+            tipo = ag_cfg["type"]
+            ag_id = ag_cfg["id"]
+            modo = ag_cfg.get("mode", "test")
+
+            if tipo == "QAgentFarol":
+                agente = QAgentFarol.cria(None)
+                agente.id = ag_id
+                agente.modo = modo
+                agente.instala(SensorVisao(alcance=1))
+                agente.instala(SensorFarol())
+
+            elif tipo == "QAgentForaging":
+                agente = QAgentForaging.cria(None)
+                agente.id = ag_id
+                agente.modo = modo
+                agente.instala(SensorVisao(alcance=2))
+                agente.instala(SensorNinho())
+
+            elif tipo == "FixedAgent":
+                policy_name = ag_cfg.get("policy", "random")
+
+                policy_map = {
+                    "farol_inteligente": policy_farol_inteligente,
+                    "foraging_inteligente": policy_foraging_inteligente,
+                    "random": policy_aleatoria
+                }
+
+                agente = FixedAgent(
+                    id=ag_id,
+                    politica=policy_map[policy_name],
+                    modo="test"
+                )
+
+            else:
+                raise ValueError(f"Tipo de agente desconhecido: {tipo}")
+
+            motor.adiciona_agente(agente)
+            # Spawn definido no JSON
+            if "spawn" in ag_cfg:
+                motor.agent_spawns[ag_id] = tuple(ag_cfg["spawn"])
+
+        return motor
 
     # Liga o ambiente à simulação
     def adiciona_ambiente(self, ambiente):
@@ -72,7 +158,15 @@ class MotorDeSimulacao:
                 print(f"\n🎬 INICIANDO EPISÓDIO {ep + 1}/{numero_episodios}")
                 print('='*50)
 
-            estado_inicial = self.ambiente.reset()
+            # Passar spawns ao reset se o ambiente suportar
+            if hasattr(self.ambiente, 'reset'):
+                try:
+                    estado_inicial = self.ambiente.reset(self.agent_spawns)
+                except TypeError:
+                    # Ambiente ainda não suporta spawns explícitos
+                    estado_inicial = self.ambiente.reset()
+            else:
+                raise RuntimeError('Ambiente sem método reset')
 
             # Reset dos agentes (política, memória, etc.)
             for ag in self.agentes:
