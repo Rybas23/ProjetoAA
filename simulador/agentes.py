@@ -1,5 +1,4 @@
 import random
-from enum import Enum
 
 class AgenteBase:
     def __init__(self, id, modo='test'):
@@ -8,7 +7,7 @@ class AgenteBase:
         self.ambiente = None
         self.sensores = []
         self.ultima_observacao = None
-        self.verbose = False
+        self.logs = False
 
         # Métricas por episódio (genéricas)
         self._current_reward = 0.0
@@ -30,7 +29,7 @@ class AgenteBase:
         self.ultima_observacao = observacao_dict
 
     def comunica(self, mensagem, agente_origem):
-        if self.verbose:
+        if self.logs:
             print(f"[{self.id}] recebeu mensagem de {agente_origem.id}: {mensagem}")
 
     # --- interface que subclasses devem implementar ---
@@ -39,8 +38,7 @@ class AgenteBase:
         raise NotImplementedError
 
     def avaliacaoEstadoAtual(self, recompensa):
-        # Atualiza métricas genéricas; subclasses podem sobrescrever mas
-        # devem chamar super() para manter estes contadores.
+        # Atualiza métricas genéricas
         self._current_reward += float(recompensa)
 
     def reset(self, episodio):
@@ -225,17 +223,24 @@ class QAgentFarol(QAgentBase):
         )
 
     def _to_state(self, observacao):
-        # FarolEnv: usa posicao, direcao do farol e visão (se existir)
-        pos = tuple(observacao.get('pos', (0, 0)))
+        """Estado compacto para o FarolEnv.
+
+        Usa apenas:
+          - direcao_farol: direção relativa ao farol (N,S,E,O,NONE)
+          - paredes locais nas direções L,R,U,D (1 se parede, 0 se livre)
+        """
         direcao = observacao.get('direcao_farol', 'NONE')
 
-        visao = observacao.get('visao')
-        if isinstance(visao, dict):
-            visao_state = tuple(sorted(visao.items()))
-        else:
-            visao_state = None
+        visao = observacao.get('visao', {})
+        # No FarolEnv, visao[L/R/U/D] é 'PAREDE', 'VAZIO', 'FAROL', 'AG_X', etc.
+        paredes = (
+            1 if visao.get('L') == 'PAREDE' else 0,
+            1 if visao.get('R') == 'PAREDE' else 0,
+            1 if visao.get('U') == 'PAREDE' else 0,
+            1 if visao.get('D') == 'PAREDE' else 0,
+        )
 
-        return ('pos', pos, 'dir', direcao, 'visao', visao_state)
+        return (direcao, paredes)
 
 #  Q-AGENT PARA O AMBIENTE DE FORAGING (ForagingEnv)
 class QAgentForaging(QAgentBase):
@@ -243,6 +248,8 @@ class QAgentForaging(QAgentBase):
         if lista_acoes is None:
             lista_acoes = ['UP', 'DOWN', 'LEFT', 'RIGHT', 'PICK', 'DROP']
         super().__init__(id=id, lista_acoes=lista_acoes, modo=modo)
+        # memória simples: última ação
+        self.ultima_acao = None
 
     @classmethod
     def cria(cls, p):
@@ -255,24 +262,35 @@ class QAgentForaging(QAgentBase):
         )
 
     def _to_state(self, observacao):
-        # ForagingEnv: pos, visão de recursos, carregando, ninho relativo
-        pos = tuple(observacao.get('pos', (0, 0)))
+        """Estado compacto e local para o ForagingEnv.
 
+        Usa apenas a visão local (valores L,R,U,D,C) e o flag carrying,
+        mais a última ação para dar um pouco de memória.
+        Evita posição e ninho absolutos para melhorar generalização.
+        """
         visao = observacao.get('visao', {})
-        if isinstance(visao, dict):
-            visao_state = tuple(sorted(visao.items()))
-        else:
-            visao_state = None
+        visao_state = (
+            visao.get('L', 0),
+            visao.get('R', 0),
+            visao.get('U', 0),
+            visao.get('D', 0),
+            visao.get('C', 0),
+        )
 
         carrying = int(observacao.get('carrying', 0))
 
-        nest = observacao.get('nest', None)
-        if isinstance(nest, tuple):
-            nest_state = nest
-        else:
-            nest_state = None
+        # usa string da última ação ou um marcador neutro
+        last_action = self.ultima_acao or 'NONE'
 
-        return ('pos', pos,
-                'visao', visao_state,
-                'carry', carrying,
-                'nest', nest_state)
+        return (visao_state, carrying, last_action)
+
+    def age(self):
+        """Override para guardar última ação escolhida, reutilizando a lógica base."""
+        acao = super().age()
+        self.ultima_acao = acao
+        return acao
+
+    def reset(self, episodio):
+        """Limpa memória de episódio (inclui última ação)."""
+        super().reset(episodio)
+        self.ultima_acao = None

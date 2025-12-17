@@ -11,25 +11,24 @@ class ForagingEnv:
         self,
         width=10,
         height=10,
-        n_resources=10,
         ninho=(0, 0),
-        max_steps=200,
         paredes=None,
+        recursos=None,
     ):
 
         self.width = width                   # Largura da grelha
         self.height = height                 # Altura da grelha
-        self.n_resources = n_resources       # Nº inicial de recursos
         self.ninho = ninho                   # Posição do ninho
-        self.max_steps = max_steps
 
         self.step = 0
         self.agent_ids = []
         self.agent_pos = {}                  # Posição dos agentes
         self.carrying = {}                  # 1 ou 0 (se carrega recurso)
-        self.resources = {}                 # (x,y) → quantidade no tile
-        # Novo: paredes/obstáculos fixos no mapa
-        self.walls = set(paredes or [])
+        # guardar configuração inicial dos recursos para poder repor em cada episódio
+        self.initial_resources = {tuple(r) for r in (recursos or [])}
+        # estado corrente de recursos (set mutável)
+        self.resources = set(self.initial_resources)
+        self.walls = {tuple(w) for w in (paredes or [])}
 
     # Registar agentes
     def registar_agentes(self, agentes):
@@ -38,13 +37,9 @@ class ForagingEnv:
     # Reiniciar episódio
     def reset(self):
         self.step = 0
-        self.resources = {}
 
-        # Espalhar recursos aleatoriamente
-        for _ in range(self.n_resources):
-            x = random.randint(0, self.width - 1)
-            y = random.randint(0, self.height - 1)
-            self.resources[(x, y)] = self.resources.get((x, y), 0) + 1
+        # repor recursos iniciais em cada novo episódio
+        self.resources = set(self.initial_resources)
 
         # Colocar agentes no ninho
         for aid in self.agent_ids:
@@ -58,9 +53,8 @@ class ForagingEnv:
     # Estado global do ambiente
     def _state(self):
         return {
-            "resources": dict(self.resources),
             "agents": dict(self.agent_pos),
-            "ninho": self.ninho,
+            "resources": list(self.resources),
             "walls": list(self.walls),
         }
 
@@ -102,11 +96,13 @@ class ForagingEnv:
                     if (nx, ny) in self.walls:
                         vis[k] = -1  # parede
                     else:
-                        vis[k] = self.resources.get((nx, ny), 0)
+                        # 1 se existir recurso, 0 caso contrário
+                        vis[k] = 1 if (nx, ny) in self.resources else 0
                 else:
                     vis[k] = -1  # fora da grelha tratado como parede
 
-            vis["C"] = self.resources.get((x, y), 0)  # recurso no tile atual
+            # recurso no tile atual (1 ou 0)
+            vis["C"] = 1 if (x, y) in self.resources else 0
             obs["visao"] = vis
 
         # SensorCarregando → informa se está a carregar recurso
@@ -122,11 +118,18 @@ class ForagingEnv:
     # Executar ação do agente
     def agir(self, acao, agente):
         ag_id = agente.id
+        # penalização base por passo
         recompensa = -0.01
 
-        # 1) Movimento (sem STAY)
+        # guardar posição anterior para calcular distância manhattan
+        x_old, y_old = self.agent_pos.get(ag_id, self.ninho)
+        pos_old = (x_old, y_old)
+
+        carrying_before = self.carrying.get(ag_id, 0)
+
+        # 1) Movimento
         if acao in ["UP", "DOWN", "LEFT", "RIGHT"]:
-            x, y = self.agent_pos[ag_id]
+            x, y = pos_old
             novo_x, novo_y = x, y
 
             if acao == "UP" and y > 0:
@@ -138,9 +141,9 @@ class ForagingEnv:
             elif acao == "RIGHT" and x < self.width - 1:
                 novo_x += 1
 
-            # Verificar parede: se destino for parede, não mexe e penaliza um pouco
+            # Verificar parede: se destino for parede, não mexe e penaliza mais
             if (novo_x, novo_y) in self.walls:
-                return -0.1, False
+                return -0.2, False
 
             # Atualiza posição
             self.agent_pos[ag_id] = (novo_x, novo_y)
@@ -149,19 +152,17 @@ class ForagingEnv:
         elif acao == "PICK":
             x, y = self.agent_pos[ag_id]
             tipo = self._tipo_celula(x, y)
-            tem_recurso = tipo == "recurso" and self.resources.get((x, y), 0) > 0
+            tem_recurso = tipo == "recurso"
             livre = self.carrying[ag_id] == 0
 
             if tem_recurso and livre:
-                # PICK válido
-                self.resources[(x, y)] -= 1
-                if self.resources[(x, y)] == 0:
-                    del self.resources[(x, y)]
+                # PICK válido → remove recurso dessa célula
+                self.resources.discard((x, y))
                 self.carrying[ag_id] = 1
-                recompensa = 1.0
+                recompensa = 0.5
             else:
                 # PICK inválido (sem recurso ou já a carregar)
-                recompensa = -0.1
+                recompensa = -2
 
         elif acao == "DROP":
             x, y = self.agent_pos[ag_id]
@@ -176,11 +177,38 @@ class ForagingEnv:
                 recompensa = 5.0
             else:
                 # DROP inválido (fora do ninho ou sem recurso)
-                recompensa = -0.1
+                recompensa = -2
 
         else:
             # Ação inválida
-            recompensa = -0.05
+            recompensa = -0.1
+
+        # ---------- DISTÂNCIA DE MANHATTAN ----------
+        # Depois de aplicar a ação (ou não, se for PICK/DROP), calcular mudança de distância
+        pos_new = self.agent_pos.get(ag_id, pos_old)
+
+        shaping = 0.0
+
+        # Se estiver a carregar recurso → queremos aproximar do ninho
+        if carrying_before == 1:
+            d_old = self._manhattan(pos_old, self.ninho)
+            d_new = self._manhattan(pos_new, self.ninho)
+            if d_new < d_old:
+                shaping += 0.05  # prémio pequeno por aproximar
+            elif d_new > d_old:
+                shaping -= 0.05  # penalização por afastar
+
+        # Se não estiver a carregar → queremos aproximar de algum recurso
+        else:
+            d_old = self._dist_to_closest_resource(pos_old)
+            d_new = self._dist_to_closest_resource(pos_new)
+            if d_old is not None and d_new is not None:
+                if d_new < d_old:
+                    shaping += 0.02
+                elif d_new > d_old:
+                    shaping -= 0.02
+
+        recompensa += shaping
 
         return recompensa, False
 
@@ -190,4 +218,16 @@ class ForagingEnv:
 
     # Fim do episódio
     def is_episode_done(self):
-        return self.step >= self.max_steps or len(self.resources) == 0
+        # Episódio termina quando não houver mais recursos;
+        # o limite máximo de passos é controlado pelo motor.
+        return len(self.resources) == 0
+
+    def _manhattan(self, a, b):
+        ax, ay = a
+        bx, by = b
+        return abs(ax - bx) + abs(ay - by)
+
+    def _dist_to_closest_resource(self, pos):
+        if not self.resources:
+            return None
+        return min(self._manhattan(pos, r) for r in self.resources)

@@ -16,9 +16,8 @@ class TipoDirecao(Enum):
 
 
 class FarolEnv:
-    def __init__(self, size=10, max_steps=200, farol_fixo=None, paredes=None):
+    def __init__(self, size=10, farol_fixo=None, paredes=None):
         self.size = size                     # Tamanho da grelha NxN
-        self.max_steps = max_steps           # Limite máximo de passos
         self.farol = farol_fixo or (size // 2, size // 2)  # Posição do farol
 
         # Conjunto de posições ocupadas por paredes/obstáculos
@@ -168,7 +167,7 @@ class FarolEnv:
         if (x, y) in self.walls:
             return {
                 "tipo": "parede",
-                "recompensa": -0.2,
+                "recompensa": -2,
                 "bloqueia": True,
             }
 
@@ -255,4 +254,6 @@ class FarolEnv:
 
     # Condição de fim do episódio
     def is_episode_done(self):
-        return self.step >= self.max_steps or len(self.done_agents) == len(self.agent_ids)
+        # Episódio termina quando todos os agentes atingirem o farol;
+        # o limite máximo de passos é controlado pelo motor.
+        return len(self.done_agents) == len(self.agent_ids)

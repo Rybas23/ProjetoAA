@@ -7,6 +7,43 @@ from engine import MotorDeSimulacao
 from visualizador import Visualizador
 
 
+def _print_qtable_summary(agent, max_states=10):
+    """Imprime um pequeno resumo da Q-table de um agente Q-learning."""
+    if not hasattr(agent, "qtable") or not agent.qtable:
+        print(f"[QTABLE] Agente {agent.id} não tem Q-table ou está vazia.")
+        return
+
+    print(f"\n=== Q-table summary for agent {agent.id} ===")
+    print("Number of states:", len(agent.qtable))
+
+    for i, (state, action_qs) in enumerate(agent.qtable.items()):
+        if i >= max_states:
+            break
+        best_action = max(action_qs, key=action_qs.get)
+        print(f"\nState {i}: {state}")
+        print("  Q-values:", action_qs)
+        print("  Best action:", best_action)
+
+
+def _export_qtable(agent, base_name: str):
+    """Guarda a Q-table em ficheiro .csv"""
+    if not hasattr(agent, "qtable") or not agent.qtable:
+        return
+
+    # Guardar CSV: uma linha por (estado, ação)
+    csv_path = f"{base_name}_{agent.id}.csv"
+    try:
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["state", "action", "q_value"])
+            for state, action_qs in agent.qtable.items():
+                for action, q in action_qs.items():
+                    writer.writerow([repr(state), action, q])
+        print(f"[QTABLE] Guardada Q-table em {csv_path}")
+    except Exception as e:
+        print(f"[QTABLE] Erro ao guardar CSV para {agent.id}: {e}")
+
+
 class SimuladorInterativo:
     """
     Pequeno invólucro para manter compatibilidade com o modo anterior:
@@ -27,7 +64,7 @@ class SimuladorInterativo:
         params = motor.params
         sim_cfg = params.get("simulation", {})
         render = sim_cfg.get("render", False)
-        verbose = sim_cfg.get("verbose", False)
+        logs = sim_cfg.get("logs", False)
         usar_visualizador = sim_cfg.get("use_visualizer", False)
 
         viz = None
@@ -44,7 +81,15 @@ class SimuladorInterativo:
             )
             motor.liga_visualizador(viz)
 
-        metrics, extras = motor.executa(render=render, verbose=verbose)
+        metrics, extras = motor.executa(render=render, logs=logs)
+
+        # Após a simulação, imprimir e exportar Q-table para quaisquer agentes Q*
+        for ag in motor.listaAgentes():
+            if ag.__class__.__name__.startswith("QAgent"):
+                _print_qtable_summary(ag, max_states=10)
+                # base_name inclui o problema para distinguir ficheiros
+                base_name = f"qtable_{params.get('problem', 'env').lower()}"
+                _export_qtable(ag, base_name)
 
         if viz:
             viz.cleanup()
@@ -145,13 +190,13 @@ def quick_regression_tests():
         ],
         "simulation": {
             "render": False,
-            "verbose": False,
+            "logs": False,
         },
     }
 
     motor_farol_learn = MotorDeSimulacao.cria(params_farol_learn)
     metrics_f_learn, extras_f_learn = motor_farol_learn.executa(
-        render=False, verbose=False
+        render=False, logs=False
     )
     ag_f_learn = motor_farol_learn.listaAgentes()[0]
 
@@ -159,9 +204,6 @@ def quick_regression_tests():
     print("Farol learn -> success_rate:", metrics_f_learn.get("success_rate"))
     print("Farol learn -> tracker dist_final_Q1:", extras_f_learn.get("dist_final_Q1"))
     print("Farol learn -> agent internal metrics:", ag_f_learn.get_metrics())
-
-    qt_path = "q_farol_regtest.pkl"
-    ag_f_learn.save_qtable(qt_path)
 
     print("\n=== REGRESSION TESTS: FAROL (TEST MODE, FIXED POLICY) ===")
 
@@ -172,12 +214,10 @@ def quick_regression_tests():
     ag_f_test = motor_farol_test.listaAgentes()[0]
 
     # Carregar Q-table treinada
-    with open(qt_path, "rb") as f:
-        q_before = pickle.load(f)
     ag_f_test.load_qtable(qt_path)
 
     metrics_f_test, extras_f_test = motor_farol_test.executa(
-        render=False, verbose=False
+        render=False, logs=False
     )
     q_after = ag_f_test.qtable
 
@@ -187,8 +227,6 @@ def quick_regression_tests():
     print("Farol test -> agent internal metrics:", ag_f_test.get_metrics())
     print("Farol test -> Q-table changed in test mode?", q_before != q_after)
 
-    if os.path.exists(qt_path):
-        os.remove(qt_path)
 
     print("\n=== REGRESSION TESTS: FORAGING (LEARN) ===")
 
@@ -214,12 +252,12 @@ def quick_regression_tests():
         ],
         "simulation": {
             "render": False,
-            "verbose": False,
+            "logs": False,
         },
     }
 
     motor_foraging = MotorDeSimulacao.cria(params_foraging_learn)
-    metrics_fg, extras_fg = motor_foraging.executa(render=False, verbose=False)
+    metrics_fg, extras_fg = motor_foraging.executa(render=False, logs=False)
     ag_fg = motor_foraging.listaAgentes()[0]
 
     print("Foraging learn -> rewards:", metrics_fg.get("reward_QF1"))

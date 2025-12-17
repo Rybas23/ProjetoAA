@@ -132,7 +132,7 @@ class Visualizador:
 
         # Ordem de desenho
         self._draw_elements(grid, walls, self.SYMBOLS["wall"])
-        self._draw_elements(grid, resources.keys(), self.SYMBOLS["resource"])
+        self._draw_elements(grid, resources, self.SYMBOLS["resource"])
         self._draw_single_element(grid, ninho, self.SYMBOLS["ninho"])
         self._draw_single_element(grid, farol, self.SYMBOLS["farol"])
         self._draw_agents(grid, agents)
@@ -141,13 +141,14 @@ class Visualizador:
         return True
 
     def draw(self, ambiente):
-        recursos = getattr(ambiente, "resources", {})
         agentes = ambiente.agent_pos
         ninho = getattr(ambiente, "ninho", None)
         farol = getattr(ambiente, "farol", None)
         walls = getattr(ambiente, "walls", None)  # funciona para Farol e Foraging
+        resources = getattr(ambiente, "resources", None)
 
-        return self.draw_grid(recursos, agentes, ninho=ninho, farol=farol, walls=walls)
+
+        return self.draw_grid(resources, agentes, ninho=ninho, farol=farol, walls=walls)
 
     def check_events(self):
         return self.running

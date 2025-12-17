@@ -38,7 +38,6 @@ class MotorDeSimulacao:
 
             ambiente = FarolEnv(
                 size=env_cfg.get("size", 10),
-                max_steps=env_cfg.get("max_steps", 200),
                 farol_fixo=tuple(env_cfg.get("farol_fixo", None)),
                 paredes=[tuple(p) for p in env_cfg.get("walls", [])],
             )
@@ -49,10 +48,9 @@ class MotorDeSimulacao:
             ambiente = ForagingEnv(
                 width=env_cfg.get("width", 10),
                 height=env_cfg.get("height", 10),
-                n_resources=env_cfg.get("n_resources", 10),
                 ninho=tuple(env_cfg.get("ninho", (0, 0))),
-                max_steps=env_cfg.get("max_steps", 200),
                 paredes=[tuple(p) for p in env_cfg.get("walls", [])],
+                recursos=[tuple(r) for r in env_cfg.get("resources", [])],
             )
         else:
             raise ValueError("Problema desconhecido no JSON")
@@ -136,7 +134,7 @@ class MotorDeSimulacao:
             self.tracker = MetricsTracker(self.agentes)
 
     # EXECUÇÃO DA SIMULAÇÃO
-    def executa(self, render=False, verbose=False):
+    def executa(self, render=False, logs=False):
         if self.ambiente is None:
             raise RuntimeError("Ambiente não definido")
 
@@ -146,16 +144,16 @@ class MotorDeSimulacao:
 
         self.cria_tracker()
 
-        # Ativar modo verbose nos agentes, se necessário
+        # Ativar modo logs nos agentes, se necessário
         for ag in self.agentes:
-            ag.verbose = verbose
+            ag.logs = logs
 
         numero_episodios = self.params.get("episodes", 10)
 
         # LOOP PRINCIPAL DE EPISÓDIOS #
         for ep in range(numero_episodios):
 
-            if verbose:
+            if logs:
                 print(f"\n🎬 INICIANDO EPISÓDIO {ep + 1}/{numero_episodios}")
                 print("=" * 50)
 
@@ -190,7 +188,7 @@ class MotorDeSimulacao:
                 for ag in self.agentes:
                     acao_escolhida = ag.age()
                     lista_acoes.append((ag, acao_escolhida))
-                    if verbose:
+                    if logs:
                         print(f"🎯 [{ag.id}] -> {acao_escolhida}")
 
                 # 3. Ambiente executa ações e retorna recompensas
@@ -199,7 +197,7 @@ class MotorDeSimulacao:
                     ag.avaliacaoEstadoAtual(recompensa)
                     recompensa_por_agente[ag.id] += recompensa
 
-                    if verbose and recompensa != 0:
+                    if logs and recompensa != 0:
                         print(f"   [{ag.id}] reward {recompensa:+.3f}")
 
                 # 4. Verificar conclusão do episódio
@@ -253,7 +251,7 @@ class MotorDeSimulacao:
             except Exception:
                 pass
 
-            if verbose:
+            if logs:
                 print(
                     f"🏁 EP {ep+1} done steps={passo_atual} rewards={recompensa_por_agente}"
                 )
