@@ -287,7 +287,7 @@ class GAAgentBase(AgenteBase):
     - After each episode, if fitness improved, keep genome; otherwise mutate.
     """
     def __init__(self, id, lista_acoes, feature_dim, modo='learn',
-                 mutation_rate=0.1, mutation_scale=0.1):
+                 mutation_rate=0.2, mutation_scale=0.2):
         super().__init__(id=id, modo=modo)
         self.lista_acoes = list(lista_acoes)
         self.n_actions = len(self.lista_acoes)
@@ -329,8 +329,9 @@ class GAAgentBase(AgenteBase):
 
     def age(self):
         """
-        Selects an action using the current genome.
-        No exploration noise here; learning happens between episodes via mutation.
+        Select an action using the current genome.
+        In 'learn' mode we use a softmax policy (stochastic),
+        in other modes we act greedily.
         """
         if self.ultima_observacao is None:
             # fallback: random until we see an observation
@@ -339,14 +340,36 @@ class GAAgentBase(AgenteBase):
             return acao
 
         feats = self._to_features(self.ultima_observacao)
-        # ensure correct size
         if len(feats) != self.feature_dim:
             raise ValueError(f"Expected feature_dim={self.feature_dim}, got {len(feats)}")
 
         scores = self._forward(feats)
-        # greedy action
-        best_idx = max(range(self.n_actions), key=lambda i: scores[i])
-        acao = self.lista_acoes[best_idx]
+
+        if self.modo == "learn":
+            # --- softmax exploration ---
+            tau = 0.7  # temperature; tune as needed
+            # numeric stability
+            max_s = max(scores)
+            exp_scores = [math.exp((s - max_s) / tau) for s in scores]
+            total = sum(exp_scores)
+            if total <= 0.0 or any(math.isnan(e) for e in exp_scores):
+                # fallback: uniform random
+                acao = random.choice(self.lista_acoes)
+            else:
+                probs = [e / total for e in exp_scores]
+                r = random.random()
+                cumsum = 0.0
+                idx = 0
+                for i, p in enumerate(probs):
+                    cumsum += p
+                    if r <= cumsum:
+                        idx = i
+                        break
+                acao = self.lista_acoes[idx]
+        else:
+            # greedy action (test mode)
+            best_idx = max(range(self.n_actions), key=lambda i: scores[i])
+            acao = self.lista_acoes[best_idx]
 
         self.regista_passo()
         return acao
@@ -369,15 +392,25 @@ class GAAgentBase(AgenteBase):
             new_genome.append(w)
         return new_genome
 
+    def get_metrics(self):
+        base = super().get_metrics()
+        base.update({
+            "best_fitness": self.best_fitness,
+            "genome_size": len(self.genome),
+        })
+        return base
+
+    def _calc_fitness(self):
+        """Default fitness: total episode reward."""
+        return self._episode_reward
+
     def reset(self, episodio):
         """
-        Called at start of each episode by the engine.
-        Here we treat the reward accumulated in the *previous* episode
-        as fitness, and possibly update the genome.
+        Called at start of each episode.
+        Treat accumulated reward (or custom metric) as fitness.
         """
-        # close previous episode if any steps happened
         if self._current_steps > 0:
-            fitness = self._episode_reward
+            fitness = self._calc_fitness()
             if self.modo == "learn":
                 if fitness > self.best_fitness:
                     self.best_fitness = fitness
@@ -386,19 +419,11 @@ class GAAgentBase(AgenteBase):
                     # revert to best and mutate
                     self.genome = self._mutate(self.best_genome)
 
-        # reset counters and reward
+        # reset state for new episode
         self._current_reward = 0.0
         self._current_steps = 0
         self._episode_reward = 0.0
         self.ultima_observacao = None
-
-    def get_metrics(self):
-        base = super().get_metrics()
-        base.update({
-            "best_fitness": self.best_fitness,
-            "genome_size": len(self.genome),
-        })
-        return base
 
 #  AGENTE GENÉTICO PARA O AMBIENTE FAROL (FarolEnv)
 class GAAgentFarol(GAAgentBase):
@@ -536,6 +561,19 @@ class GAAgentForaging(GAAgentBase):
             mutation_rate=p.get("mutation_rate", 0.1),
             mutation_scale=p.get("mutation_scale", 0.1),
         )
+
+    def _calc_fitness(self):
+        """
+        Fitness: prioritize delivered resources, then reward.
+        Assumes ambiente has total_delivered.
+        """
+        ambiente = getattr(self, "ambiente", None)
+        delivered = 0
+        if ambiente is not None:
+            delivered = getattr(ambiente, "total_delivered", 0)
+
+        # weight delivered heavily so policies that actually solve the task win
+        return 10.0 * delivered + self._episode_reward
 
     def _to_features(self, observacao):
         """

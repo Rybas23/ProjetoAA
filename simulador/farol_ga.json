@@ -21,7 +21,7 @@
     "render": true,
     "verbose": true,
     "render_delay": 0.05,
-    "use_visualizer": true
+    "use_visualizer": false
   },
 
   "agents": [
