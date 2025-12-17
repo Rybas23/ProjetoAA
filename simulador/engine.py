@@ -58,8 +58,8 @@ class MotorDeSimulacao:
         motor.adiciona_ambiente(ambiente)
 
         # ---------- CRIAR AGENTES ----------
-        from agentes import QAgentFarol, QAgentForaging, FixedAgent
-        from sensors import SensorVisao, SensorFarol, SensorNinho
+        from agentes import QAgentFarol, QAgentForaging, FixedAgent, GAAgentForaging, GAAgentFarol
+        from sensors import SensorVisao, SensorFarol, SensorNinho, SensorCarregando
         from policies import (
             policy_farol_inteligente,
             policy_foraging_inteligente,
@@ -84,6 +84,22 @@ class MotorDeSimulacao:
                 agente.modo = modo
                 agente.instala(SensorVisao(alcance=2))
                 agente.instala(SensorNinho())
+                agente.instala(SensorCarregando())
+
+            elif tipo == "GAAgentForaging":
+                agente = GAAgentForaging.cria(ag_cfg)
+                agente.id = ag_id
+                agente.modo = modo
+                agente.instala(SensorVisao(alcance=2))
+                agente.instala(SensorNinho())
+                agente.instala(SensorCarregando())
+
+            elif tipo == "GAAgentFarol":
+                agente = GAAgentFarol.cria(ag_cfg)
+                agente.id = ag_id
+                agente.modo = modo
+                agente.instala(SensorVisao(alcance=1))
+                agente.instala(SensorFarol())
 
             elif tipo == "FixedAgent":
                 policy_name = ag_cfg.get("policy", "random")

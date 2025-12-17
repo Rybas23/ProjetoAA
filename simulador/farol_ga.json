@@ -1,0 +1,41 @@
+{
+  "problem": "Farol",
+
+  "episodes": 50,
+  "max_steps": 100,
+
+  "environment": {
+    "size": 10,
+    "max_steps": 100,
+    "farol_fixo": [5, 5],
+    "walls": [
+      [3, 1], [6, 1],
+      [2, 3], [7, 3],
+      [1, 5], [4, 5], [8, 5],
+      [2, 7], [5, 7],
+      [3, 8], [6, 8]
+    ]
+  },
+
+  "simulation": {
+    "render": true,
+    "verbose": true,
+    "render_delay": 0.05,
+    "use_visualizer": false
+  },
+
+  "agents": [
+    {
+      "type": "GAAgentFarol",
+      "id": "GAF1",
+      "mode": "learn",
+      "spawn": [0, 0],
+      "mutation_rate": 0.1,
+      "mutation_scale": 0.1
+    }
+  ],
+
+  "output": {
+    "csv": "learning_farol_GAF1.csv"
+  }
+}

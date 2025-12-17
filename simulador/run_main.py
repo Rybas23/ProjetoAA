@@ -287,7 +287,7 @@ def main():
     try:
         # Exemplo: executar diretamente um ficheiro JSON
         # (altere para `farol.json` ou use o menu_principal)
-        simulador.executarJson("foraging.json")
+        simulador.executarJson("farol_ga.json")
 
         # ou:
         # simulador.menu_principal()

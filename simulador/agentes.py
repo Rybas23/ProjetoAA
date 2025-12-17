@@ -1,4 +1,6 @@
 import random
+import math
+from enum import Enum
 
 class AgenteBase:
     def __init__(self, id, modo='test'):
@@ -294,3 +296,354 @@ class QAgentForaging(QAgentBase):
         """Limpa memória de episódio (inclui última ação)."""
         super().reset(episodio)
         self.ultima_acao = None
+
+#  BASE DE UM AGENTE COM ALGORITMO GENETICO (REDES NEURONAIS SIMPLES)
+class GAAgentBase(AgenteBase):
+    """
+    Simple genetic / evolutionary agent:
+    - Policy is a linear mapping features -> action scores (weights = genome).
+    - Fitness = total return per episode.
+    - After each episode, if fitness improved, keep genome; otherwise mutate.
+    """
+    def __init__(self, id, lista_acoes, feature_dim, modo='learn',
+                 mutation_rate=0.2, mutation_scale=0.2):
+        super().__init__(id=id, modo=modo)
+        self.lista_acoes = list(lista_acoes)
+        self.n_actions = len(self.lista_acoes)
+        self.feature_dim = feature_dim
+        self.mutation_rate = float(mutation_rate)
+        self.mutation_scale = float(mutation_scale)
+
+        # Genome = flattened weight matrix [n_actions x feature_dim]
+        self.genome = [random.uniform(-0.1, 0.1)
+                       for _ in range(self.n_actions * self.feature_dim)]
+        self.best_genome = list(self.genome)
+        self.best_fitness = -math.inf
+
+        # Last episode fitness
+        self._episode_reward = 0.0
+
+    # ----- representation hooks (subclasses override) -----
+
+    def _to_features(self, observacao):
+        """
+        Map raw observation dict -> feature vector (list[float]) of length feature_dim.
+        Subclasses must override.
+        """
+        raise NotImplementedError
+
+    # ----- policy evaluation -----
+
+    def _forward(self, features):
+        """Compute action scores = W * features."""
+        scores = [0.0] * self.n_actions
+        idx = 0
+        for a in range(self.n_actions):
+            s = 0.0
+            for f in range(self.feature_dim):
+                s += self.genome[idx] * features[f]
+                idx += 1
+            scores[a] = s
+        return scores
+
+    def age(self):
+        """
+        Select an action using the current genome.
+        In 'learn' mode we use a softmax policy (stochastic),
+        in other modes we act greedily.
+        """
+        if self.ultima_observacao is None:
+            # fallback: random until we see an observation
+            acao = random.choice(self.lista_acoes)
+            self.regista_passo()
+            return acao
+
+        feats = self._to_features(self.ultima_observacao)
+        if len(feats) != self.feature_dim:
+            raise ValueError(f"Expected feature_dim={self.feature_dim}, got {len(feats)}")
+
+        scores = self._forward(feats)
+
+        if self.modo == "learn":
+            # --- softmax exploration ---
+            tau = 0.7  # temperature; tune as needed
+            # numeric stability
+            max_s = max(scores)
+            exp_scores = [math.exp((s - max_s) / tau) for s in scores]
+            total = sum(exp_scores)
+            if total <= 0.0 or any(math.isnan(e) for e in exp_scores):
+                # fallback: uniform random
+                acao = random.choice(self.lista_acoes)
+            else:
+                probs = [e / total for e in exp_scores]
+                r = random.random()
+                cumsum = 0.0
+                idx = 0
+                for i, p in enumerate(probs):
+                    cumsum += p
+                    if r <= cumsum:
+                        idx = i
+                        break
+                acao = self.lista_acoes[idx]
+        else:
+            # greedy action (test mode)
+            best_idx = max(range(self.n_actions), key=lambda i: scores[i])
+            acao = self.lista_acoes[best_idx]
+
+        self.regista_passo()
+        return acao
+
+    # ----- episodic update (fitness) -----
+
+    def avaliacaoEstadoAtual(self, recompensa):
+        # track reward as fitness signal
+        super().avaliacaoEstadoAtual(recompensa)
+        self._episode_reward += float(recompensa)
+
+    def _mutate(self, base_genome):
+        """
+        Simple Gaussian mutation applied elementwise with given mutation_rate.
+        """
+        new_genome = []
+        for w in base_genome:
+            if random.random() < self.mutation_rate:
+                w = w + random.gauss(0.0, self.mutation_scale)
+            new_genome.append(w)
+        return new_genome
+
+    def get_metrics(self):
+        base = super().get_metrics()
+        base.update({
+            "best_fitness": self.best_fitness,
+            "genome_size": len(self.genome),
+        })
+        return base
+
+    def _calc_fitness(self):
+        """Default fitness: total episode reward."""
+        return self._episode_reward
+
+    def reset(self, episodio):
+        """
+        Called at start of each episode.
+        Treat accumulated reward (or custom metric) as fitness.
+        """
+        if self._current_steps > 0:
+            fitness = self._calc_fitness()
+            if self.modo == "learn":
+                if fitness > self.best_fitness:
+                    self.best_fitness = fitness
+                    self.best_genome = list(self.genome)
+                else:
+                    # revert to best and mutate
+                    self.genome = self._mutate(self.best_genome)
+
+        # reset state for new episode
+        self._current_reward = 0.0
+        self._current_steps = 0
+        self._episode_reward = 0.0
+        self.ultima_observacao = None
+
+#  AGENTE GENÉTICO PARA O AMBIENTE FAROL (FarolEnv)
+class GAAgentFarol(GAAgentBase):
+    """
+    Genetic‑algorithm agent for FarolEnv.
+    Features:
+    - pos (x,y) normalized by grid size (assume 10 by default)
+    - one‑hot direction to farol: N,S,E,O,NONE (5)
+    - local vision (L,R,U,D,C) each encoded as one‑hot: {PAREDE,FAROL,OUTRO} (3*5)
+    Total feature_dim = 2 + 5 + 15 = 22
+    """
+    def __init__(self, id="GAFarol", lista_acoes=None, modo="learn",
+                 mutation_rate=0.1, mutation_scale=0.1):
+        if lista_acoes is None:
+            lista_acoes = ["UP", "DOWN", "LEFT", "RIGHT"]
+
+        feature_dim = 2 + 5 + 15  # = 22
+
+        super().__init__(
+            id=id,
+            lista_acoes=lista_acoes,
+            feature_dim=feature_dim,
+            modo=modo,
+            mutation_rate=mutation_rate,
+            mutation_scale=mutation_scale,
+        )
+
+    @classmethod
+    def cria(cls, p):
+        if p is None:
+            p = {}
+        return cls(
+            id=p.get("id", "GAFarol"),
+            lista_acoes=p.get("actions", None),
+            modo=p.get("mode", "learn"),
+            mutation_rate=p.get("mutation_rate", 0.1),
+            mutation_scale=p.get("mutation_scale", 0.1),
+        )
+
+    def _to_features(self, observacao):
+        """
+        Map Farol observation dict into a length‑22 feature vector.
+        observacao:
+          - "pos": (x,y)
+          - "direcao_farol": "N","S","E","O","NONE"
+          - "visao": {L,R,U,D,C} -> "PAREDE","FAROL","AG_x" or "VAZIO"
+        """
+        # 1) position
+        x, y = observacao.get("pos", (0, 0))
+        # assume size 10 if not known; still works scaled
+        pos_x = float(x) / 10.0
+        pos_y = float(y) / 10.0
+        features = [pos_x, pos_y]
+
+        # 2) one‑hot direction to farol
+        dir_str = observacao.get("direcao_farol", "NONE")
+        dirs = ["N", "S", "E", "O", "NONE"]
+        for d in dirs:
+            features.append(1.0 if dir_str == d else 0.0)
+
+        # 3) vision encoding: for each of L,R,U,D,C
+        #    types: PAREDE, FAROL, OUTRO(agente ou vazio)
+        vis = observacao.get("visao", {})
+        keys = ["L", "R", "U", "D", "C"]
+
+        def encode_cell(val):
+            t_parede = 1.0 if val == "PAREDE" else 0.0
+            t_farol = 1.0 if val == "FAROL" else 0.0
+            # any agent or vazio counts as "OUTRO"
+            t_outro = 0.0
+            if val not in ("PAREDE", "FAROL"):
+                t_outro = 1.0
+            return [t_parede, t_farol, t_outro]
+
+        for k in keys:
+            v = vis.get(k, "PAREDE")
+            features.extend(encode_cell(v))
+
+        # safety: ensure correct size
+        if len(features) != self.feature_dim and self.verbose:
+            print(f"[{self.id}] feature length {len(features)} != {self.feature_dim}")
+        return features
+
+#  AGENTE GENÉTICO PARA O AMBIENTE DE FORAGING (ForagingEnv)
+class GAAgentForaging(GAAgentBase):
+    """
+    Genetic-algorithm agent for ForagingEnv.
+    Observation -> small feature vector -> linear policy.
+    """
+    def __init__(
+        self,
+        id="GAForaging",
+        lista_acoes=None,
+        modo="learn",
+        mutation_rate=0.1,
+        mutation_scale=0.1,
+    ):
+        if lista_acoes is None:
+            # same action set as QAgentForaging
+            lista_acoes = ["UP", "DOWN", "LEFT", "RIGHT", "PICK", "DROP"]
+
+        feature_dim = 10  # pos(2) + vis(5) + carrying(1) + nest vec(2)
+
+        super().__init__(
+            id=id,
+            lista_acoes=lista_acoes,
+            feature_dim=feature_dim,
+            modo=modo,
+            mutation_rate=mutation_rate,
+            mutation_scale=mutation_scale,
+        )
+
+    @classmethod
+    def cria(cls, p):
+        """
+        Factory compatible with JSON agent config.
+        Example agent block:
+        {
+          "type": "GAAgentForaging",
+          "id": "GA1",
+          "mode": "learn",
+          "mutation_rate": 0.1,
+          "mutation_scale": 0.1
+        }
+        """
+        if p is None:
+            return cls()
+        return cls(
+            id=p.get("id", "GAForaging"),
+            lista_acoes=p.get(
+                "actions",
+                ["UP", "DOWN", "LEFT", "RIGHT", "PICK", "DROP"],
+            ),
+            modo=p.get("mode", "learn"),
+            mutation_rate=p.get("mutation_rate", 0.1),
+            mutation_scale=p.get("mutation_scale", 0.1),
+        )
+
+    def _calc_fitness(self):
+        """
+        Fitness: prioritize delivered resources, then reward.
+        Assumes ambiente has total_delivered.
+        """
+        ambiente = getattr(self, "ambiente", None)
+        delivered = 0
+        if ambiente is not None:
+            delivered = getattr(ambiente, "total_delivered", 0)
+
+        # weight delivered heavily so policies that actually solve the task win
+        return 10.0 * delivered + self._episode_reward
+
+    def _to_features(self, observacao):
+        """
+        Map Foraging observation dict into a length-10 feature vector.
+        observacao keys:
+          - "pos": (x,y)
+          - "visao": dict L,R,U,D,C -> int (resources or -1 for wall)
+          - "carrying": 0/1
+          - "nest": (nx,ny)
+        """
+        # 1) position (x,y) normalized by 10 (still reasonable for other sizes)
+        x, y = observacao.get("pos", (0, 0))
+        pos_x = float(x) / 10.0
+        pos_y = float(y) / 10.0
+
+        # 2) local vision: L,R,U,D,C
+        vis = observacao.get("visao", {})
+
+        def norm_res(v):
+            # wall or out-of-grid -> -1, treat as 0
+            if v is None:
+                return 0.0
+            if v < 0:
+                return 0.0
+            # clip and normalize count [0..5] -> [0..1]
+            return min(float(v), 5.0) / 5.0
+
+        vL = norm_res(vis.get("L", 0))
+        vR = norm_res(vis.get("R", 0))
+        vU = norm_res(vis.get("U", 0))
+        vD = norm_res(vis.get("D", 0))
+        vC = norm_res(vis.get("C", 0))
+
+        # 3) carrying flag
+        carrying = float(observacao.get("carrying", 0))
+
+        # 4) relative nest vector (nx - x, ny - y) normalized by 10
+        nest = observacao.get("nest", (0, 0))
+        nx, ny = nest
+        dx = float(nx - x) / 10.0
+        dy = float(ny - y) / 10.0
+
+        return [
+            pos_x,
+            pos_y,
+            vL,
+            vR,
+            vU,
+            vD,
+            vC,
+            carrying,
+            dx,
+            dy,
+        ]
