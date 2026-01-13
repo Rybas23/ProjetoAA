@@ -236,7 +236,7 @@ class FarolEnv:
         dist_depois = self._dist_manhattan((novo_x, novo_y))
 
         if dist_depois < dist_antes:
-            recompensa = +0.05  # aproximou\-se
+            recompensa = +1  # aproximou\-se
         elif dist_depois > dist_antes:
             recompensa = -0.05  # afastou\-se
         else:

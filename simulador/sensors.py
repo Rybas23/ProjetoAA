@@ -35,3 +35,10 @@ class SensorNinho(Sensor):
 class SensorCarregando(Sensor):
     def __init__(self):
         super().__init__("carregando", 0)
+
+
+# Sensor para detetar a direção do recurso mais próximo (usado no Foraging)
+class SensorRecursoMaisProximo(Sensor):
+    def __init__(self):
+        super().__init__("recurso_mais_proximo", 0)
+

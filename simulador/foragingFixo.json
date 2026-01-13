@@ -1,14 +1,14 @@
 {
   "problem": "Foraging",
 
-  "episodes": 500,
-  "max_steps": 250,
+  "episodes": 50,
+  "max_steps": 200,
 
   "environment": {
     "width": 10,
     "height": 10,
-    "ninho": [3, 4],
-    "max_steps": 250,
+    "ninho": [0, 0],
+    "max_steps": 200,
     "resources": [
       [5, 5], [2, 2], [7, 2],
       [4, 4], [6, 4], [1, 1],
@@ -33,14 +33,15 @@
 
   "agents": [
     {
-      "type": "QAgentForaging",
-      "id": "QF1",
-      "mode": "learn",
+      "type": "FixedAgent",
+      "id": "FF1",
+      "policy": "foraging_inteligente",
       "spawn": [0, 0]
     }
   ],
 
   "output": {
-    "csv": "learning_foraging_QF1.csv"
+    "csv": "metrics_foragingFixo_FF1.csv"
   }
 }
+

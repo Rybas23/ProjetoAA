@@ -129,6 +129,9 @@ class SimuladorInterativo:
                 lst.extend([None] * (max_len - len(lst)))
             norm[k] = lst
 
+        # Adicionar coluna de id sequencial (1..max_len)
+        norm["id"] = list(range(1, max_len + 1))
+
         fieldnames = sorted(norm.keys())
 
         with open(path, "w", newline="", encoding="utf-8") as f:
@@ -273,24 +276,12 @@ def quick_regression_tests():
 
 
 def main():
-    """
-    Ponto de entrada principal.
-
-    Durante desenvolvimento pode ser útil chamar quick_regression_tests()
-    em vez do modo interativo JSON.
-    """
-    # --- modo testes rápidos (Farol + Foraging) ---
-    # quick_regression_tests()
-
-    # --- modo interativo/JSON (como no código original) ---
     simulador = SimuladorInterativo()
     try:
-        # Exemplo: executar diretamente um ficheiro JSON
-        # (altere para `farol.json` ou use o menu_principal)
-        simulador.executarJson("farol_ga.json")
-
-        # ou:
-        # simulador.menu_principal()
+        # simulador.executarJson("farol.json")
+        # simulador.executarJson("farolFixo.json")
+        #simulador.executarJson("foragingFixo.json")
+         simulador.executarJson("foraging.json")
     except KeyboardInterrupt:
         print("\nInterrompido pelo utilizador")
 

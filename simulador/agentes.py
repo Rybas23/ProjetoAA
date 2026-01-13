@@ -1,6 +1,5 @@
 import random
 import math
-from enum import Enum
 
 class AgenteBase:
     def __init__(self, id, modo='test'):
@@ -86,16 +85,18 @@ class FixedAgent(AgenteBase):
 #  BASE DE UM AGENTE COM Q-LEARNING
 class QAgentBase(AgenteBase):
     def __init__(self, id, lista_acoes,
-                 alpha=0.4, gamma=0.95,
-                 epsilon=0.2, modo='learn'):
+                 alpha=0.3, gamma=0.99,
+                 epsilon=0.9, modo='learn'):
 
         super().__init__(id=id, modo=modo)
 
         # Q-learning params
         self.acoes = list(lista_acoes)
         self.alpha = float(alpha)
+        self.alpha_inicial = float(alpha)  # Guardar alpha inicial
         self.gamma = float(gamma)
         self.epsilon = float(epsilon)
+        self.epsilon_inicial = float(epsilon)
 
         # Q-table: dict[state][action] = valor-Q
         self.qtable = {}
@@ -104,9 +105,15 @@ class QAgentBase(AgenteBase):
         self.estado_anterior = None
         self.acao_anterior = None
 
-        # epsilon mínimo e taxa de decaimento (para learning)
-        self.epsilon_min = 0.05
-        self.epsilon_decay = 0.995
+        # epsilon e alpha: mínimos e taxas de decaimento
+        # DEFINITIVO: Convergência MUITO rápida para estabilidade máxima
+        self.epsilon_min = 0.01   # 1% exploração mínima
+        self.epsilon_decay = 0.997  # Decay MUITO rápido
+        self.alpha_min = 0.01      # Learning rate mínimo
+        self.alpha_decay = 0.98    # Decay rápido
+
+        # Contador de episódios para decay adaptativo
+        self.episodio_atual = 0
 
     # --------- Representação de estado (override em subclasses) ---------
 
@@ -130,9 +137,25 @@ class QAgentBase(AgenteBase):
 
         estado_atual = self._to_state(self.ultima_observacao)
 
-        # Garantir estado na Q-table
+        # Garantir estado na Q-table com INICIALIZAÇÃO OTIMISTA
         if estado_atual not in self.qtable:
-            self.qtable[estado_atual] = {a: 0.0 for a in self.acoes}
+            # Estado: (carrying, direcao_objetivo, no_objetivo, parede_bloqueando)
+            carrying, direcao_obj, no_obj, parede = estado_atual
+
+            self.qtable[estado_atual] = {}
+            mapa_acao = {'N': 'UP', 'S': 'DOWN', 'E': 'RIGHT', 'O': 'LEFT'}
+
+            for acao in self.acoes:
+                # Se já estamos no objetivo, todas as ações neutras
+                if no_obj:
+                    self.qtable[estado_atual][acao] = 0.5
+                # Se ação vai na direção do objetivo
+                elif direcao_obj in mapa_acao and mapa_acao[direcao_obj] == acao:
+                    # Se há parede, valor baixo; senão, otimista
+                    self.qtable[estado_atual][acao] = 0.0 if parede else 2.0
+                else:
+                    # Outras ações começam neutras
+                    self.qtable[estado_atual][acao] = 0.0
 
         # Política de seleção:
         if self.modo == 'learn' and random.random() < self.epsilon:
@@ -145,7 +168,8 @@ class QAgentBase(AgenteBase):
             melhores = [a for a, v in q_vals.items() if v == max_q]
             acao_escolhida = random.choice(melhores)
 
-        # Guardar para update futuro
+        # CRÍTICO: Guardar estado ANTES da ação para Q-Learning correto
+        # Este será o estado "s" em Q(s,a)
         self.estado_anterior = estado_atual
         self.acao_anterior = acao_escolhida
 
@@ -193,9 +217,17 @@ class QAgentBase(AgenteBase):
         self.estado_anterior = None
         self.acao_anterior = None
 
-        # epsilon decay apenas em aprendizagem
+        self.episodio_atual = episodio
+
+        # epsilon e alpha decay apenas em aprendizagem
         if self.modo == 'learn':
             self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
+            self.alpha = max(self.alpha_min, self.alpha * self.alpha_decay)
+
+            # Decay SUPER AGRESSIVO após ep 100 para forçar estabilização rápida
+            if episodio > 100:
+                self.epsilon = max(self.epsilon_min, self.epsilon * 0.80)
+                self.alpha = max(self.alpha_min, self.alpha * 0.85)
 
     def save_qtable(self, path):
         import pickle
@@ -248,10 +280,9 @@ class QAgentFarol(QAgentBase):
 class QAgentForaging(QAgentBase):
     def __init__(self, id='QForaging', lista_acoes=None, modo='learn'):
         if lista_acoes is None:
-            lista_acoes = ['UP', 'DOWN', 'LEFT', 'RIGHT', 'PICK', 'DROP']
+            # Apenas movimentos - PICK e DROP são automáticos
+            lista_acoes = ['UP', 'DOWN', 'LEFT', 'RIGHT']
         super().__init__(id=id, lista_acoes=lista_acoes, modo=modo)
-        # memória simples: última ação
-        self.ultima_acao = None
 
     @classmethod
     def cria(cls, p):
@@ -259,43 +290,51 @@ class QAgentForaging(QAgentBase):
             return cls()
         return cls(
             id=p.get('id', 'QForaging'),
-            lista_acoes=p.get('actions', ['UP', 'DOWN', 'LEFT', 'RIGHT', 'PICK', 'DROP']),
+            lista_acoes=p.get('actions', ['UP', 'DOWN', 'LEFT', 'RIGHT']),
             modo=p.get('mode', 'test')
         )
 
     def _to_state(self, observacao):
-        """Estado compacto e local para o ForagingEnv.
+        """Estado BALANCEADO: compacto mas com informação essencial.
 
-        Usa apenas a visão local (valores L,R,U,D,C) e o flag carrying,
-        mais a última ação para dar um pouco de memória.
-        Evita posição e ninho absolutos para melhorar generalização.
+        Total: 2 × 5 × 2 × 2 = 40 estados
         """
-        visao = observacao.get('visao', {})
-        visao_state = (
-            visao.get('L', 0),
-            visao.get('R', 0),
-            visao.get('U', 0),
-            visao.get('D', 0),
-            visao.get('C', 0),
-        )
-
         carrying = int(observacao.get('carrying', 0))
+        visao = observacao.get('visao', {})
+        pos = observacao.get('pos', (0, 0))
+        nest = observacao.get('nest', (0, 0))
 
-        # usa string da última ação ou um marcador neutro
-        last_action = self.ultima_acao or 'NONE'
+        # Determinar direção do objetivo
+        if carrying == 0:
+            direcao_objetivo = observacao.get('direcao_recurso', 'NONE')
+        else:
+            if nest[0] > pos[0]:
+                direcao_objetivo = 'E'
+            elif nest[0] < pos[0]:
+                direcao_objetivo = 'O'
+            elif nest[1] < pos[1]:
+                direcao_objetivo = 'N'
+            elif nest[1] > pos[1]:
+                direcao_objetivo = 'S'
+            else:
+                direcao_objetivo = 'NONE'
 
-        return (visao_state, carrying, last_action)
+        # CRÍTICO: Estamos NO objetivo?
+        no_objetivo = False
+        if carrying == 0:
+            no_objetivo = (visao.get('C', 0) == 1)  # Recurso na célula atual
+        else:
+            no_objetivo = (pos == nest)  # No ninho
 
-    def age(self):
-        """Override para guardar última ação escolhida, reutilizando a lógica base."""
-        acao = super().age()
-        self.ultima_acao = acao
-        return acao
+        # Parede na direção do objetivo?
+        mapa_direcao = {'N': 'U', 'S': 'D', 'E': 'R', 'O': 'L'}
+        parede_bloqueando = False
+        if direcao_objetivo in mapa_direcao:
+            tecla_visao = mapa_direcao[direcao_objetivo]
+            parede_bloqueando = (visao.get(tecla_visao, 0) == -1)
 
-    def reset(self, episodio):
-        """Limpa memória de episódio (inclui última ação)."""
-        super().reset(episodio)
-        self.ultima_acao = None
+        return (carrying, direcao_objetivo, no_objetivo, parede_bloqueando)
+
 
 #  BASE DE UM AGENTE COM ALGORITMO GENETICO (REDES NEURONAIS SIMPLES)
 class GAAgentBase(AgenteBase):
@@ -521,9 +560,6 @@ class GAAgentFarol(GAAgentBase):
             v = vis.get(k, "PAREDE")
             features.extend(encode_cell(v))
 
-        # safety: ensure correct size
-        if len(features) != self.feature_dim and self.verbose:
-            print(f"[{self.id}] feature length {len(features)} != {self.feature_dim}")
         return features
 
 #  AGENTE GENÉTICO PARA O AMBIENTE DE FORAGING (ForagingEnv)
@@ -541,8 +577,8 @@ class GAAgentForaging(GAAgentBase):
         mutation_scale=0.1,
     ):
         if lista_acoes is None:
-            # same action set as QAgentForaging
-            lista_acoes = ["UP", "DOWN", "LEFT", "RIGHT", "PICK", "DROP"]
+            # Apenas movimentos - PICK e DROP são automáticos
+            lista_acoes = ["UP", "DOWN", "LEFT", "RIGHT"]
 
         feature_dim = 10  # pos(2) + vis(5) + carrying(1) + nest vec(2)
 
@@ -574,7 +610,7 @@ class GAAgentForaging(GAAgentBase):
             id=p.get("id", "GAForaging"),
             lista_acoes=p.get(
                 "actions",
-                ["UP", "DOWN", "LEFT", "RIGHT", "PICK", "DROP"],
+                ["UP", "DOWN", "LEFT", "RIGHT"],
             ),
             modo=p.get("mode", "learn"),
             mutation_rate=p.get("mutation_rate", 0.1),

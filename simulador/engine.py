@@ -59,7 +59,7 @@ class MotorDeSimulacao:
 
         # ---------- CRIAR AGENTES ----------
         from agentes import QAgentFarol, QAgentForaging, FixedAgent, GAAgentForaging, GAAgentFarol
-        from sensors import SensorVisao, SensorFarol, SensorNinho, SensorCarregando
+        from sensors import SensorVisao, SensorFarol, SensorNinho, SensorCarregando, SensorRecursoMaisProximo
         from policies import (
             policy_farol_inteligente,
             policy_foraging_inteligente,
@@ -85,6 +85,7 @@ class MotorDeSimulacao:
                 agente.instala(SensorVisao(alcance=2))
                 agente.instala(SensorNinho())
                 agente.instala(SensorCarregando())
+                agente.instala(SensorRecursoMaisProximo())
 
             elif tipo == "GAAgentForaging":
                 agente = GAAgentForaging.cria(ag_cfg)
@@ -93,6 +94,7 @@ class MotorDeSimulacao:
                 agente.instala(SensorVisao(alcance=2))
                 agente.instala(SensorNinho())
                 agente.instala(SensorCarregando())
+                agente.instala(SensorRecursoMaisProximo())
 
             elif tipo == "GAAgentFarol":
                 agente = GAAgentFarol.cria(ag_cfg)
@@ -115,6 +117,14 @@ class MotorDeSimulacao:
                     politica=policy_map[policy_name],
                     modo="test",
                 )
+
+                # Instalar sensores
+                if problem == "Farol":
+                    agente.instala(SensorFarol())
+                elif problem == "Foraging":
+                    agente.instala(SensorVisao(alcance=2))
+                    agente.instala(SensorNinho())
+                    agente.instala(SensorCarregando())
 
             else:
                 raise ValueError(f"Tipo de agente desconhecido: {tipo}")
@@ -194,12 +204,12 @@ class MotorDeSimulacao:
             # LOOP INTERNO DE PASSOS NO EPISÓDIO
             while passo_atual < self.max_steps and not episodio_terminado:
 
-                # 1. Cada agente recebe observação do ambiente
+                # 1. Cada agente recebe observação do estado ATUAL
                 for ag in self.agentes:
                     obs = self.ambiente.observacaoPara(ag)
                     ag.observacao(obs)
 
-                # 2. Cada agente decide uma ação
+                # 2. Cada agente decide uma ação baseado no estado atual
                 lista_acoes = []
                 for ag in self.agentes:
                     acao_escolhida = ag.age()
@@ -207,16 +217,30 @@ class MotorDeSimulacao:
                     if logs:
                         print(f"🎯 [{ag.id}] -> {acao_escolhida}")
 
-                # 3. Ambiente executa ações e retorna recompensas
+                # 3. Ambiente executa ações (transição de estado)
+                recompensas_passo = {}
                 for ag, acao in lista_acoes:
                     recompensa, terminou = self.ambiente.agir(acao, ag)
-                    ag.avaliacaoEstadoAtual(recompensa)
+                    recompensas_passo[ag.id] = recompensa
                     recompensa_por_agente[ag.id] += recompensa
 
                     if logs and recompensa != 0:
                         print(f"   [{ag.id}] reward {recompensa:+.3f}")
 
-                # 4. Verificar conclusão do episódio
+                # 4. Atualização interna do ambiente
+                self.ambiente.atualizacao()
+
+                # 5. CRÍTICO PARA Q-LEARNING: Dar nova observação (s') ANTES de avaliar
+                #    Agora última_observacao terá o NOVO estado (s')
+                for ag in self.agentes:
+                    obs_nova = self.ambiente.observacaoPara(ag)
+                    ag.observacao(obs_nova)
+
+                # 6. Q-Learning update: agora agente tem s (guardado), a, r, e s' (última_observacao)
+                for ag, acao in lista_acoes:
+                    ag.avaliacaoEstadoAtual(recompensas_passo[ag.id])
+
+                # 7. Verificar conclusão do episódio
                 episodio_terminado = self.ambiente.is_episode_done()
 
                 # 5. Atualização interna do ambiente
@@ -271,6 +295,15 @@ class MotorDeSimulacao:
                 print(
                     f"🏁 EP {ep+1} done steps={passo_atual} rewards={recompensa_por_agente}"
                 )
+
+        # Salvar heatmaps dos agentes no final
+        for ag in self.agentes:
+            heatmap_filename = f"heatmap_{ag.id}.csv"
+            try:
+                ag.save_heatmap(heatmap_filename)
+                print(f"📍 Heatmap salvo: {heatmap_filename}")
+            except Exception as e:
+                print(f"⚠️ Erro ao salvar heatmap de {ag.id}: {e}")
 
         # Dados extra gerados pelo tracker
         extras = dict(self.tracker.data) if self.tracker else {}

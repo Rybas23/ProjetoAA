@@ -1,7 +1,7 @@
 {
-  "problem": "Farol",
+  "problem": "FarolFixo",
 
-  "episodes": 100,
+  "episodes": 500,
   "max_steps": 100,
 
   "environment": {
@@ -30,14 +30,14 @@
 
   "agents": [
     {
-      "type": "QAgentFarol",
-      "id": "Q1",
-      "mode": "learn",
+      "type": "FixedAgent",
+      "id": "F1",
+      "policy": "policy_farol_inteligente",
       "spawn": [0, 0]
     }
   ],
 
   "output": {
-    "csv": "learning_farol_Q1.csv"
+    "csv": "metrics_farolFixo_F1.csv"
   }
 }

@@ -3,8 +3,6 @@
 #  - Podem carregar 1 recurso de cada vez.
 #  - Ganham recompensa ao entregar recursos no ninho.
 
-import random
-
 
 class ForagingEnv:
     def __init__(
@@ -35,15 +33,18 @@ class ForagingEnv:
         self.agent_ids = [ag.id for ag in agentes]
 
     # Reiniciar episódio
-    def reset(self):
+    def reset(self, agent_spawns=None):
         self.step = 0
 
         # repor recursos iniciais em cada novo episódio
         self.resources = set(self.initial_resources)
 
-        # Colocar agentes no ninho
+        # Colocar agentes nas posições de spawn (ou ninho por padrão)
         for aid in self.agent_ids:
-            self.agent_pos[aid] = self.ninho
+            if agent_spawns and aid in agent_spawns:
+                self.agent_pos[aid] = agent_spawns[aid]
+            else:
+                self.agent_pos[aid] = self.ninho
             self.carrying[aid] = 0
 
         self.total_delivered = 0  # Contagem global de entregas
@@ -113,15 +114,40 @@ class ForagingEnv:
         if "ninho" in tipos_sensores:
             obs["nest"] = self.ninho
 
+        # SensorRecursoMaisProximo → indica direção do recurso mais próximo
+        if "recurso_mais_proximo" in tipos_sensores:
+            if len(self.resources) > 0:
+                # Encontrar recurso mais próximo por distância Manhattan
+                recursos_com_dist = [
+                    (self._manhattan((x, y), r), r) for r in self.resources
+                ]
+                dist_min, recurso_proximo = min(recursos_com_dist, key=lambda t: t[0])
+                rx, ry = recurso_proximo
+
+                # Calcular direção relativa (prioridade: horizontal depois vertical)
+                if rx > x:
+                    direcao_recurso = "E"  # Este
+                elif rx < x:
+                    direcao_recurso = "O"  # Oeste
+                elif ry < y:
+                    direcao_recurso = "N"  # Norte
+                elif ry > y:
+                    direcao_recurso = "S"  # Sul
+                else:
+                    direcao_recurso = "NONE"  # Agente está em cima do recurso
+            else:
+                direcao_recurso = "NONE"  # Sem recursos disponíveis
+
+            obs["direcao_recurso"] = direcao_recurso
+
         return obs
 
     # Executar ação do agente
     def agir(self, acao, agente):
         ag_id = agente.id
-        # penalização base por passo
-        recompensa = -0.01
+        recompensa = 0
 
-        # guardar posição anterior para calcular distância manhattan
+        # guardar posição anterior
         x_old, y_old = self.agent_pos.get(ag_id, self.ninho)
         pos_old = (x_old, y_old)
 
@@ -141,72 +167,70 @@ class ForagingEnv:
             elif acao == "RIGHT" and x < self.width - 1:
                 novo_x += 1
 
-            # Verificar parede: se destino for parede, não mexe e penaliza mais
+            # Verificar parede: se destino for parede, não mexe
             if (novo_x, novo_y) in self.walls:
-                return -0.2, False
+                return -0.01, False
 
             # Atualiza posição
             self.agent_pos[ag_id] = (novo_x, novo_y)
 
-        # 2) Ações de interação com recursos (PICK/DROP)
-        elif acao == "PICK":
-            x, y = self.agent_pos[ag_id]
-            tipo = self._tipo_celula(x, y)
-            tem_recurso = tipo == "recurso"
-            livre = self.carrying[ag_id] == 0
-
-            if tem_recurso and livre:
-                # PICK válido → remove recurso dessa célula
-                self.resources.discard((x, y))
-                self.carrying[ag_id] = 1
-                recompensa = 0.5
-            else:
-                # PICK inválido (sem recurso ou já a carregar)
-                recompensa = -2
-
-        elif acao == "DROP":
-            x, y = self.agent_pos[ag_id]
-            tipo = self._tipo_celula(x, y)
-            no_ninho = tipo == "ninho"
-            a_carregar = self.carrying[ag_id] == 1
-
-            if no_ninho and a_carregar:
-                # DROP válido
-                self.carrying[ag_id] = 0
-                self.total_delivered += 1
-                recompensa = 5.0
-            else:
-                # DROP inválido (fora do ninho ou sem recurso)
-                recompensa = -2
+            # Penalização por movimento
+            recompensa = -0.01
 
         else:
-            # Ação inválida
-            recompensa = -0.1
+            # Ação inválida (não devia acontecer)
+            return 0.0, False
 
-        # ---------- DISTÂNCIA DE MANHATTAN ----------
-        # Depois de aplicar a ação (ou não, se for PICK/DROP), calcular mudança de distância
-        pos_new = self.agent_pos.get(ag_id, pos_old)
+        # 2) LÓGICA AUTOMÁTICA: PICK e DROP após movimento
+        x_new, y_new = self.agent_pos[ag_id]
+        tipo = self._tipo_celula(x_new, y_new)
 
+        # PICK: se estiver em cima de recurso e não estiver a carregar
+        if tipo == "recurso" and self.carrying[ag_id] == 0:
+            self.resources.discard((x_new, y_new))
+            self.carrying[ag_id] = 1
+            recompensa += 2.0
+
+        # DROP: se estiver no ninho e estiver a carregar
+        elif tipo == "ninho" and self.carrying[ag_id] == 1:
+            self.carrying[ag_id] = 0
+            self.total_delivered += 1
+            recompensa += 5.0
+
+        # 3) REWARD SHAPING: Recompensa por aproximar-se do objetivo
         shaping = 0.0
 
-        # Se estiver a carregar recurso → queremos aproximar do ninho
-        if carrying_before == 1:
-            d_old = self._manhattan(pos_old, self.ninho)
-            d_new = self._manhattan(pos_new, self.ninho)
-            if d_new < d_old:
-                shaping += 0.05  # prémio pequeno por aproximar
-            elif d_new > d_old:
-                shaping -= 0.05  # penalização por afastar
+        # Determinar objetivo baseado no estado de carrying ANTES do movimento
+        if carrying_before == 0:
+            # Não estava a carregar → objetivo era o recurso mais próximo
+            # IMPORTANTE: usar self.resources + recurso que acabou de apanhar (se aplicável)
+            recursos_para_calculo = set(self.resources)
 
-        # Se não estiver a carregar → queremos aproximar de algum recurso
+            # Se apanhou recurso, adicionar de volta para cálculo justo
+            if tipo == "recurso" and self.carrying[ag_id] == 1:
+                recursos_para_calculo.add((x_new, y_new))
+
+            if len(recursos_para_calculo) > 0:
+                # Distância antes do movimento
+                dist_antes = min(self._manhattan(pos_old, r) for r in recursos_para_calculo)
+                # Distância depois do movimento
+                dist_depois = min(self._manhattan((x_new, y_new), r) for r in recursos_para_calculo)
+
+                # Recompensa se aproximou, penalização se afastou
+                if dist_depois < dist_antes:
+                    shaping = 0.05  # Reduzido de 0.1 para 0.05
+                elif dist_depois > dist_antes:
+                    shaping = -0.02  # Reduzido de -0.05 para -0.02
         else:
-            d_old = self._dist_to_closest_resource(pos_old)
-            d_new = self._dist_to_closest_resource(pos_new)
-            if d_old is not None and d_new is not None:
-                if d_new < d_old:
-                    shaping += 0.02
-                elif d_new > d_old:
-                    shaping -= 0.02
+            # Estava a carregar → objetivo era o ninho
+            dist_antes = self._manhattan(pos_old, self.ninho)
+            dist_depois = self._manhattan((x_new, y_new), self.ninho)
+
+            # Recompensa se aproximou, penalização se afastou
+            if dist_depois < dist_antes:
+                shaping = 0.05  # Reduzido de 0.1 para 0.05
+            elif dist_depois > dist_antes:
+                shaping = -0.02  # Reduzido de -0.05 para -0.02
 
         recompensa += shaping
 
@@ -227,7 +251,3 @@ class ForagingEnv:
         bx, by = b
         return abs(ax - bx) + abs(ay - by)
 
-    def _dist_to_closest_resource(self, pos):
-        if not self.resources:
-            return None
-        return min(self._manhattan(pos, r) for r in self.resources)
