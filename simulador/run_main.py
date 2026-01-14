@@ -278,10 +278,11 @@ def quick_regression_tests():
 def main():
     simulador = SimuladorInterativo()
     try:
-        # simulador.executarJson("farol.json")
+        #simulador.executarJson("farol.json")
         # simulador.executarJson("farolFixo.json")
         #simulador.executarJson("foragingFixo.json")
-         simulador.executarJson("foraging.json")
+        #simulador.executarJson("foraging.json")
+        simulador.executarJson("farol_ga.json")
     except KeyboardInterrupt:
         print("\nInterrompido pelo utilizador")
 
