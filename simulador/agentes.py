@@ -129,6 +129,14 @@ class QAgentBase(AgenteBase):
             itens.append((k, v))
         return tuple(itens)
 
+    def _inicializar_estado(self, estado):
+        """Inicializa os valores Q para um novo estado.
+
+        Por padrão, inicializa todas as ações com 0.0.
+        Subclasses podem sobrescrever para inicialização otimista.
+        """
+        return {acao: 0.0 for acao in self.acoes}
+
     # --------- Escolha de ação ---------
 
     def age(self):
@@ -137,25 +145,9 @@ class QAgentBase(AgenteBase):
 
         estado_atual = self._to_state(self.ultima_observacao)
 
-        # Garantir estado na Q-table com INICIALIZAÇÃO OTIMISTA
+        # Garantir estado na Q-table
         if estado_atual not in self.qtable:
-            # Estado: (carrying, direcao_objetivo, no_objetivo, parede_bloqueando)
-            carrying, direcao_obj, no_obj, parede = estado_atual
-
-            self.qtable[estado_atual] = {}
-            mapa_acao = {'N': 'UP', 'S': 'DOWN', 'E': 'RIGHT', 'O': 'LEFT'}
-
-            for acao in self.acoes:
-                # Se já estamos no objetivo, todas as ações neutras
-                if no_obj:
-                    self.qtable[estado_atual][acao] = 0.5
-                # Se ação vai na direção do objetivo
-                elif direcao_obj in mapa_acao and mapa_acao[direcao_obj] == acao:
-                    # Se há parede, valor baixo; senão, otimista
-                    self.qtable[estado_atual][acao] = 0.0 if parede else 2.0
-                else:
-                    # Outras ações começam neutras
-                    self.qtable[estado_atual][acao] = 0.0
+            self.qtable[estado_atual] = self._inicializar_estado(estado_atual)
 
         # Política de seleção:
         if self.modo == 'learn' and random.random() < self.epsilon:
@@ -276,6 +268,39 @@ class QAgentFarol(QAgentBase):
 
         return (direcao, paredes)
 
+    def _inicializar_estado(self, estado):
+        """Inicialização otimista para o problema do farol.
+
+        Estado: (direcao, paredes)
+        onde direcao é a direção relativa ao farol (N,S,E,O,NONE)
+        e paredes é uma tupla de 4 valores (L,R,U,D) indicando se há parede
+        """
+        direcao, paredes = estado
+
+        valores = {}
+        mapa_acao = {'N': 'UP', 'S': 'DOWN', 'E': 'RIGHT', 'O': 'LEFT'}
+
+        for acao in self.acoes:
+            # Se já estamos no farol (NONE), todas as ações neutras
+            if direcao == 'NONE':
+                valores[acao] = 0.5
+            # Se ação vai na direção do farol
+            elif direcao in mapa_acao and mapa_acao[direcao] == acao:
+                # Verificar se há parede nessa direção
+                idx_parede = {'LEFT': 0, 'RIGHT': 1, 'UP': 2, 'DOWN': 3}
+                if acao in idx_parede and paredes[idx_parede[acao]] == 1:
+                    # Há parede, valor baixo
+                    valores[acao] = 0.0
+                else:
+                    # Sem parede, otimista
+                    valores[acao] = 2.0
+            else:
+                # Outras ações começam neutras
+                valores[acao] = 0.0
+
+        return valores
+
+
 #  Q-AGENT PARA O AMBIENTE DE FORAGING (ForagingEnv)
 class QAgentForaging(QAgentBase):
     def __init__(self, id='QForaging', lista_acoes=None, modo='learn'):
@@ -334,6 +359,30 @@ class QAgentForaging(QAgentBase):
             parede_bloqueando = (visao.get(tecla_visao, 0) == -1)
 
         return (carrying, direcao_objetivo, no_objetivo, parede_bloqueando)
+
+    def _inicializar_estado(self, estado):
+        """Inicialização otimista para foraging.
+
+        Estado: (carrying, direcao_objetivo, no_objetivo, parede_bloqueando)
+        """
+        carrying, direcao_obj, no_obj, parede = estado
+
+        valores = {}
+        mapa_acao = {'N': 'UP', 'S': 'DOWN', 'E': 'RIGHT', 'O': 'LEFT'}
+
+        for acao in self.acoes:
+            # Se já estamos no objetivo, todas as ações neutras
+            if no_obj:
+                valores[acao] = 0.5
+            # Se ação vai na direção do objetivo
+            elif direcao_obj in mapa_acao and mapa_acao[direcao_obj] == acao:
+                # Se há parede, valor baixo; senão, otimista
+                valores[acao] = 0.0 if parede else 2.0
+            else:
+                # Outras ações começam neutras
+                valores[acao] = 0.0
+
+        return valores
 
 
 #  BASE DE UM AGENTE COM ALGORITMO GENETICO (REDES NEURONAIS SIMPLES)
