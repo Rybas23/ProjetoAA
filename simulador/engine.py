@@ -40,6 +40,7 @@ class MotorDeSimulacao:
                 size=env_cfg.get("size", 10),
                 farol_fixo=tuple(env_cfg.get("farol_fixo", None)),
                 paredes=[tuple(p) for p in env_cfg.get("walls", [])],
+                max_steps=env_cfg.get("max_steps", 100),
             )
 
         elif problem == "Foraging":

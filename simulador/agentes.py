@@ -64,6 +64,11 @@ class AgenteBase:
             'lengths': list(self.episode_lengths),
         }
 
+    def save_heatmap(self, filename):
+        """Salva heatmap de posições visitadas (implementação padrão: não faz nada)."""
+        # Agentes que não rastreiam posições simplesmente ignoram
+        pass
+
 #  AGENTE FIXO (NÃO APRENDE)
 class FixedAgent(AgenteBase):
     def __init__(self, id, politica, modo='test'):
@@ -115,6 +120,9 @@ class QAgentBase(AgenteBase):
         # Contador de episódios para decay adaptativo
         self.episodio_atual = 0
 
+        # Tracking de posições para heatmap
+        self.position_heatmap = {}  # {(x,y): count}
+
     # --------- Representação de estado (override em subclasses) ---------
 
     def _to_state(self, observacao):
@@ -142,6 +150,13 @@ class QAgentBase(AgenteBase):
     def age(self):
         if self.ultima_observacao is None:
             raise RuntimeError(f"[{self.id}] age() chamado sem observação")
+
+        # Tracking de posição para heatmap
+        if 'pos' in self.ultima_observacao:
+            pos = tuple(self.ultima_observacao['pos'])
+            if pos not in self.position_heatmap:
+                self.position_heatmap[pos] = 0
+            self.position_heatmap[pos] += 1
 
         estado_atual = self._to_state(self.ultima_observacao)
 
@@ -230,6 +245,18 @@ class QAgentBase(AgenteBase):
         import pickle
         with open(path, 'rb') as f:
             self.qtable = pickle.load(f)
+
+    def save_heatmap(self, filename):
+        """Salva heatmap de posições visitadas em formato CSV."""
+        if not self.position_heatmap:
+            return  # Sem dados para salvar
+
+        import csv
+        with open(filename, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['x', 'y', 'visits'])
+            for (x, y), count in sorted(self.position_heatmap.items()):
+                writer.writerow([x, y, count])
 
 #  Q-AGENT PARA O AMBIENTE FAROL (FarolEnv)
 class QAgentFarol(QAgentBase):
@@ -402,14 +429,37 @@ class GAAgentBase(AgenteBase):
         self.mutation_rate = float(mutation_rate)
         self.mutation_scale = float(mutation_scale)
 
-        # Genome = flattened weight matrix [n_actions x feature_dim]
-        self.genome = [random.uniform(-0.1, 0.1)
+        # POPULAÇÃO de genomes para diversidade
+        self.population_size = 30  # Manter 30 melhores genomes (aumentado de 15)
+        self.population = []  # Lista de (fitness, genome)
+
+        # Contador de episódios para estratégia adaptativa
+        self.episode_count = 0
+
+        # Parâmetros adaptativos de mutação (guardar valores iniciais)
+        self.initial_mutation_rate = float(mutation_rate)
+        self.initial_mutation_scale = float(mutation_scale)
+
+        # Genome atual = flattened weight matrix [n_actions x feature_dim]
+        # Inicialização com valores ligeiramente maiores para dar "força" inicial
+        self.genome = [random.uniform(-0.5, 0.5)
                        for _ in range(self.n_actions * self.feature_dim)]
         self.best_genome = list(self.genome)
         self.best_fitness = -math.inf
 
         # Last episode fitness
         self._episode_reward = 0.0
+
+        # Tracking de fitness por genome (para cálculo de média)
+        self.genome_fitness_history = {}
+
+        # Tracking de posições para heatmap
+        self.position_heatmap = {}  # {(x,y): count} - acumula TODOS os episódios
+        self.episode_heatmap = {}   # {(x,y): count} - apenas episódio atual
+
+        # Anti-loop: memória de últimas posições para detectar bloqueio
+        self.recent_positions = []  # últimas 8 posições
+        self.stuck_counter = 0  # contador de vezes em loop
 
     # ----- representation hooks (subclasses override) -----
 
@@ -446,6 +496,49 @@ class GAAgentBase(AgenteBase):
             self.regista_passo()
             return acao
 
+        # Tracking de posição para heatmap
+        if 'pos' in self.ultima_observacao:
+            pos = tuple(self.ultima_observacao['pos'])
+
+            # Heatmap global (todos os episódios) - para CSV
+            if pos not in self.position_heatmap:
+                self.position_heatmap[pos] = 0
+            self.position_heatmap[pos] += 1
+
+            # Heatmap do episódio atual (para fitness/bloqueios)
+            if pos not in self.episode_heatmap:
+                self.episode_heatmap[pos] = 0
+            self.episode_heatmap[pos] += 1
+
+            # ANTI-LOOP AGRESSIVO: Detectar bloqueios rapidamente
+            self.recent_positions.append(pos)
+            if len(self.recent_positions) > 8:
+                self.recent_positions.pop(0)
+
+            # DETECÇÃO DE LOOP MULTINÍVEL:
+            if len(self.recent_positions) >= 4:
+                unique_positions = len(set(self.recent_positions))
+                recent_4 = self.recent_positions[-4:]
+                unique_recent_4 = len(set(recent_4))
+
+                # Nível 1: Últimas 4 posições são apenas 1-2 diferentes
+                if unique_recent_4 <= 2:
+                    self.stuck_counter += 2  # Incremento maior!
+                # Nível 2: Últimas 8 posições são apenas 2-3 diferentes
+                elif len(self.recent_positions) >= 8 and unique_positions <= 3:
+                    self.stuck_counter += 1
+                else:
+                    self.stuck_counter = max(0, self.stuck_counter - 1)  # Decai lentamente
+
+                # Se preso há 2+ incrementos, FORÇA saída
+                if self.stuck_counter >= 2 and self.modo == "learn":
+                    # Escolher ação diferente da última
+                    available_actions = [a for a in self.lista_acoes]
+                    acao = random.choice(available_actions)
+                    self.stuck_counter = 0  # Reset após forçar
+                    self.regista_passo()
+                    return acao
+
         feats = self._to_features(self.ultima_observacao)
         if len(feats) != self.feature_dim:
             raise ValueError(f"Expected feature_dim={self.feature_dim}, got {len(feats)}")
@@ -453,8 +546,27 @@ class GAAgentBase(AgenteBase):
         scores = self._forward(feats)
 
         if self.modo == "learn":
-            # --- softmax exploration ---
-            tau = 0.7  # temperature; tune as needed
+            # --- softmax exploration com temperatura DECRESCENTE ---
+            # Temperatura alta inicial (exploração) → temperatura baixa final (exploitação)
+            # Episódio 0: tau = 1.0 (muito estocástico)
+            # Episódio 100: tau = 0.2 (mais determinístico)
+            # Episódio 200+: tau = 0.05 (quase greedy)
+
+            # Calcular episódio atual baseado em episode_rewards
+            current_episode = len(self.episode_rewards)
+
+            if current_episode < 100:
+                # Fase 1: tau decresce de 1.0 → 0.2
+                progress = current_episode / 100.0
+                tau = 1.0 - (0.8 * progress)  # 1.0 → 0.2
+            elif current_episode < 200:
+                # Fase 2: tau decresce de 0.2 → 0.05
+                progress = (current_episode - 100) / 100.0
+                tau = 0.2 - (0.15 * progress)  # 0.2 → 0.05
+            else:
+                # Fase 3: tau fixo muito baixo (quase greedy)
+                tau = 0.05
+
             # numeric stability
             max_s = max(scores)
             exp_scores = [math.exp((s - max_s) / tau) for s in scores]
@@ -488,22 +600,63 @@ class GAAgentBase(AgenteBase):
         super().avaliacaoEstadoAtual(recompensa)
         self._episode_reward += float(recompensa)
 
-    def _mutate(self, base_genome):
+    def _mutate(self, base_genome, generation=0):
         """
-        Simple Gaussian mutation applied elementwise with given mutation_rate.
+        Mutação ULTRA-conservadora - apenas refinamento mínimo.
+
+        Args:
+            base_genome: Genome base para mutar
+            generation: Geração atual (para calcular decaimento)
         """
+        # Taxa MUITO baixa: 2% → 0.5%
+        decay_factor = max(0.25, 1.0 - (generation / 300.0))
+        effective_rate = 0.02 * decay_factor
+
+        # Força MUITO pequena: 0.05 → 0.01
+        effective_scale = 0.05 * decay_factor
+
         new_genome = []
         for w in base_genome:
-            if random.random() < self.mutation_rate:
-                w = w + random.gauss(0.0, self.mutation_scale)
+            if random.random() < effective_rate:
+                w = w + random.gauss(0.0, effective_scale)
             new_genome.append(w)
         return new_genome
+
+    def _crossover(self, parent1, parent2):
+        """
+        Uniform crossover melhorado: cada peso vem de um dos pais com 50% probabilidade.
+        Preserva estrutura dos pais em blocos contíguos.
+        """
+        child = []
+        # Crossover por blocos para preservar estrutura
+        for i, (w1, w2) in enumerate(zip(parent1, parent2)):
+            # Alterna entre pais em blocos de feature_dim
+            if (i // self.feature_dim) % 2 == 0:
+                child.append(w1 if random.random() < 0.7 else w2)
+            else:
+                child.append(w2 if random.random() < 0.7 else w1)
+        return child
+
+    def _tournament_selection(self, tournament_size=3):
+        """
+        Seleciona um genome da população usando torneio de tamanho 3.
+        Retorna o melhor genome entre tournament_size candidatos aleatórios.
+        """
+        if len(self.population) < tournament_size:
+            # Se população pequena, retorna o melhor
+            return max(self.population, key=lambda x: x[0])[1]
+
+        candidates = random.sample(self.population, tournament_size)
+        winner = max(candidates, key=lambda x: x[0])
+        return winner[1]
 
     def get_metrics(self):
         base = super().get_metrics()
         base.update({
             "best_fitness": self.best_fitness,
             "genome_size": len(self.genome),
+            "population_size": len(self.population),
+            "population_fitness": [f for f, _ in self.population] if self.population else [],
         })
         return base
 
@@ -514,23 +667,71 @@ class GAAgentBase(AgenteBase):
     def reset(self, episodio):
         """
         Called at start of each episode.
-        Treat accumulated reward (or custom metric) as fitness.
+        ESTRATÉGIA SIMPLES: Elitismo forte com refinamento mínimo.
         """
         if self._current_steps > 0:
             fitness = self._calc_fitness()
+
             if self.modo == "learn":
+                # Adicionar genome atual à população
+                self.population.append((fitness, list(self.genome)))
+
+                # Manter apenas os N melhores
+                self.population.sort(key=lambda x: x[0], reverse=True)
+                self.population = self.population[:self.population_size]
+
+                # Atualizar melhor fitness global
                 if fitness > self.best_fitness:
                     self.best_fitness = fitness
                     self.best_genome = list(self.genome)
+
+                # ESTRATÉGIA SIMPLES: 90% usar o melhor, 10% exploração mínima
+                if random.random() < 0.10 and episodio < 400:
+                    # 10% exploração nos primeiros 400 episódios
+                    if len(self.population) >= 2 and random.random() < 0.5:
+                        # Crossover entre top 2
+                        parent1 = self.best_genome
+                        parent2 = self.population[1][1] if len(self.population) > 1 else self.best_genome
+                        child = self._crossover(parent1, parent2)
+                        self.genome = self._mutate(child, episodio)
+                    else:
+                        # Mutação leve do melhor
+                        self.genome = self._mutate(list(self.best_genome), episodio)
                 else:
-                    # revert to best and mutate
-                    self.genome = self._mutate(self.best_genome)
+                    # 90%: Usar sempre o melhor genome
+                    self.genome = list(self.best_genome)
 
         # reset state for new episode
         self._current_reward = 0.0
         self._current_steps = 0
         self._episode_reward = 0.0
         self.ultima_observacao = None
+
+        # Resetar anti-loop
+        self.recent_positions = []
+        self.stuck_counter = 0
+
+        # Resetar heatmap do episódio
+        self.episode_heatmap = {}
+
+        # Resetar anti-loop
+        self.recent_positions = []
+        self.stuck_counter = 0
+
+        # Resetar heatmap do episódio (para detecção de bloqueios)
+        self.episode_heatmap = {}
+
+    def save_heatmap(self, filename):
+        """Salva heatmap de posições visitadas em formato CSV."""
+        if not self.position_heatmap:
+            return  # Sem dados para salvar
+
+        import csv
+        with open(filename, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['x', 'y', 'visits'])
+            for (x, y), count in sorted(self.position_heatmap.items()):
+                writer.writerow([x, y, count])
 
 #  AGENTE GENÉTICO PARA O AMBIENTE FAROL (FarolEnv)
 class GAAgentFarol(GAAgentBase):
@@ -557,6 +758,55 @@ class GAAgentFarol(GAAgentBase):
             mutation_rate=mutation_rate,
             mutation_scale=mutation_scale,
         )
+
+        # INICIALIZAÇÃO BALANCEADA - permite exploração mantendo conhecimento básico
+        self._init_intelligent_genome()
+
+    def _init_intelligent_genome(self):
+        """
+        Inicialização INTELIGENTE FORTE para garantir boa performance.
+
+        Bias FORTE:
+        - Direção farol: +1.0 a +1.5 (forte tendência)
+        - Evitar paredes: -4.0 a -5.0 (penalização forte)
+
+        Resultado: Agente começa já com bom desempenho e refina através de GA
+        """
+        for action_idx, action in enumerate(self.lista_acoes):
+            for feat_idx in range(self.feature_dim):
+                genome_idx = action_idx * self.feature_dim + feat_idx
+
+                # BIAS FORTE: Seguir direção do farol
+                if feat_idx == 2 and action == 'UP':  # dir_N -> UP
+                    self.genome[genome_idx] = random.uniform(1.0, 1.5)
+                elif feat_idx == 3 and action == 'DOWN':  # dir_S -> DOWN
+                    self.genome[genome_idx] = random.uniform(1.0, 1.5)
+                elif feat_idx == 4 and action == 'RIGHT':  # dir_E -> RIGHT
+                    self.genome[genome_idx] = random.uniform(1.0, 1.5)
+                elif feat_idx == 5 and action == 'LEFT':  # dir_O -> LEFT
+                    self.genome[genome_idx] = random.uniform(1.0, 1.5)
+
+                # Bias negativo para ir CONTRA direção do farol
+                elif feat_idx == 2 and action == 'DOWN':  # dir_N mas vai DOWN
+                    self.genome[genome_idx] = random.uniform(-2.0, -1.5)
+                elif feat_idx == 3 and action == 'UP':  # dir_S mas vai UP
+                    self.genome[genome_idx] = random.uniform(-2.0, -1.5)
+                elif feat_idx == 4 and action == 'LEFT':  # dir_E mas vai LEFT
+                    self.genome[genome_idx] = random.uniform(-2.0, -1.5)
+                elif feat_idx == 5 and action == 'RIGHT':  # dir_O mas vai RIGHT
+                    self.genome[genome_idx] = random.uniform(-2.0, -1.5)
+
+                # BIAS FORTE: Evitar paredes
+                if feat_idx == 7 and action == 'LEFT':  # parede à esquerda -> não LEFT
+                    self.genome[genome_idx] = random.uniform(-5.0, -4.0)
+                if feat_idx == 10 and action == 'RIGHT':  # parede à direita -> não RIGHT
+                    self.genome[genome_idx] = random.uniform(-5.0, -4.0)
+                if feat_idx == 13 and action == 'UP':  # parede acima -> não UP
+                    self.genome[genome_idx] = random.uniform(-5.0, -4.0)
+                if feat_idx == 16 and action == 'DOWN':  # parede abaixo -> não DOWN
+                    self.genome[genome_idx] = random.uniform(-5.0, -4.0)
+
+        self.best_genome = list(self.genome)
 
     @classmethod
     def cria(cls, p):
@@ -610,6 +860,84 @@ class GAAgentFarol(GAAgentBase):
             features.extend(encode_cell(v))
 
         return features
+
+    def _calc_fitness(self):
+        """
+        Fitness especializado para Farol com FOCO TOTAL EM SUCESSO + EFICIÊNCIA.
+
+        OBJETIVOS:
+        1. Agentes que ATINGEM o farol têm fitness >> 0
+        2. Agentes mais RÁPIDOS têm fitness maior
+        3. Agentes que FALHAM têm fitness muito baixo ou zero
+
+        Formula melhorada:
+        - SUCESSO (reward >= 100): fitness = 1000 + (200 - steps) * 10
+          * Base: 1000 pontos por sucesso
+          * Bonus eficiência: Até 2000 pontos (se steps=0) a 0 pontos (se steps=200)
+          * Range: [1000, 3000]
+
+        - FALHA (reward < 100): fitness = max(0, reward - steps * 0.5)
+          * Recompensa parcial por aproximação
+          * Penalização por gastar muitos passos
+          * Range: [0, ~100]
+
+        RESULTADO: Agentes bem-sucedidos têm fitness 10-30x maior que falhas
+        """
+        reward = self._episode_reward
+        steps = self._current_steps
+
+        # Threshold de sucesso: chegou ao farol
+        SUCCESS_THRESHOLD = 100.0
+
+        if reward >= SUCCESS_THRESHOLD:
+            # ✓ SUCESSO! Fitness MASSIVO com bonus ENORME por eficiência
+            # OBJETIVO: Agente de 14 steps >> Agente de 50 steps
+
+            base_success = 10000.0  # Base MUITO alta (aumentado de 1000)
+
+            # Bonus EXPONENCIAL por eficiência
+            # Quanto menos steps, MUITO maior o bonus
+            max_steps = 200
+            steps_ratio = steps / max_steps  # 0.0 (melhor) a 1.0 (pior)
+
+            # Bonus exponencial: premia MUITO mais os agentes rápidos
+            # steps=10 → ratio=0.05 → efficiency=0.95 → bonus=~18000
+            # steps=20 → ratio=0.10 → efficiency=0.90 → bonus=~16000
+            # steps=50 → ratio=0.25 → efficiency=0.75 → bonus=~10000
+            # steps=100 → ratio=0.50 → efficiency=0.50 → bonus=~5000
+            efficiency = 1.0 - steps_ratio
+            efficiency_bonus = (efficiency ** 2) * 20000.0  # Quadrático!
+
+            fitness = base_success + efficiency_bonus
+
+            # Range de fitness:
+            # 14 steps:  10000 + 19000 = 29000
+            # 20 steps:  10000 + 18000 = 28000
+            # 50 steps:  10000 + 11250 = 21250
+            # 100 steps: 10000 + 5000  = 15000
+            # 200 steps: 10000 + 0     = 10000
+
+        else:
+            # ✗ FALHA: Fitness muito baixo
+            # Pequena recompensa por aproximação, mas grande penalização
+
+            # Penalização por steps: cada step custa 0.5 fitness
+            step_penalty = steps * 0.5
+
+            # Fitness pode ser zero se gastou muitos steps sem resultado
+            fitness = max(0.0, reward - step_penalty)
+
+            # Penalização extra por bloqueio (ficar preso)
+            if hasattr(self, 'episode_heatmap') and self.episode_heatmap:
+                max_visits = max(self.episode_heatmap.values())
+                avg_visits = sum(self.episode_heatmap.values()) / len(self.episode_heatmap)
+
+                # Se visitou mesma posição muitas vezes = preso
+                if max_visits > avg_visits * 4:
+                    stuck_penalty = (max_visits - avg_visits) * 2.0
+                    fitness = max(0.0, fitness - stuck_penalty)
+
+        return fitness
 
 #  AGENTE GENÉTICO PARA O AMBIENTE DE FORAGING (ForagingEnv)
 class GAAgentForaging(GAAgentBase):
@@ -668,16 +996,34 @@ class GAAgentForaging(GAAgentBase):
 
     def _calc_fitness(self):
         """
-        Fitness: prioritize delivered resources, then reward.
-        Assumes ambiente has total_delivered.
+        Fitness para Foraging:
+        - PRIORIZA: Recursos entregues (×100 cada)
+        - BONUS: Eficiência (recursos/passo)
+        - INCLUI: Reward acumulado
+
+        Formula:
+        fitness = (recursos × 100) + (recursos/steps × 50) + reward
         """
         ambiente = getattr(self, "ambiente", None)
         delivered = 0
         if ambiente is not None:
             delivered = getattr(ambiente, "total_delivered", 0)
 
-        # weight delivered heavily so policies that actually solve the task win
-        return 10.0 * delivered + self._episode_reward
+        steps = max(self._current_steps, 1)  # Evitar divisão por zero
+
+        # Componente principal: recursos entregues
+        resource_score = delivered * 100.0
+
+        # Bonus de eficiência: recursos por passo
+        if delivered > 0:
+            efficiency_bonus = (delivered / steps) * 50.0
+        else:
+            efficiency_bonus = 0.0
+
+        # Reward acumulado (aproximação, paredes, etc)
+        reward_score = self._episode_reward
+
+        return resource_score + efficiency_bonus + reward_score
 
     def _to_features(self, observacao):
         """

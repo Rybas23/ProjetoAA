@@ -16,9 +16,10 @@ class TipoDirecao(Enum):
 
 
 class FarolEnv:
-    def __init__(self, size=10, farol_fixo=None, paredes=None):
+    def __init__(self, size=10, farol_fixo=None, paredes=None, max_steps=100):
         self.size = size                     # Tamanho da grelha NxN
         self.farol = farol_fixo or (size // 2, size // 2)  # Posição do farol
+        self.max_steps = max_steps          # Número máximo de passos por episódio
 
         # Conjunto de posições ocupadas por paredes/obstáculos
         # Cada parede é um tuplo (x, y)
@@ -163,11 +164,11 @@ class FarolEnv:
 
     def _efeito_celula(self, x, y):
         """Devolve o tipo de célula e efeitos básicos de recompensa/bloqueio."""
-        # Paredes
+        # Paredes - SEM penalização (apenas bloqueia movimento)
         if (x, y) in self.walls:
             return {
                 "tipo": "parede",
-                "recompensa": -2,
+                "recompensa": 0.0,  # Removido penalização
                 "bloqueia": True,
             }
 
@@ -175,7 +176,7 @@ class FarolEnv:
         if (x, y) == self.farol:
             return {
                 "tipo": "farol",
-                "recompensa": 10.0,
+                "recompensa": 100.0,  # RECOMPENSA MASSIVA para garantir prioridade
                 "bloqueia": False,
             }
 
@@ -211,8 +212,8 @@ class FarolEnv:
         elif acao == "RIGHT" and x < self.size - 1:
             novo_x = x + 1
         else:
-            # Ação inválida (inclui qualquer coisa que não seja movimento)
-            return -0.05, False
+            # Ação inválida - sem movimento, custo mínimo
+            return -0.01, False
 
         # 2) Consultar efeito da célula de destino
         efeito = self._efeito_celula(novo_x, novo_y)
@@ -225,9 +226,22 @@ class FarolEnv:
         # 3) Aplicar movimento
         self.agent_pos[agente_id] = (novo_x, novo_y)
 
-        # 4) Se chegou ao farol → episódio termina para este agente
+        # 4) Se chegou ao farol → calcular recompensa baseada em eficiência
         if efeito["tipo"] == "farol":
-            recompensa = efeito["recompensa"]
+            # Usar o contador de passos do próprio agente
+            steps_taken = agente._current_steps + 1  # +1 porque este passo ainda não foi contabilizado
+
+            # RECOMPENSA BASEADA EM EFICIÊNCIA:
+            # Base reward (100) + bonus por eficiência (até 50)
+            base_reward = 100.0
+
+            # Quanto menos passos, maior o bonus
+            # efficiency_ratio vai de 1.0 (poucos passos) até 0.0 (max_steps)
+            efficiency_ratio = max(0.0, 1.0 - (steps_taken / self.max_steps))
+            efficiency_bonus = 50.0 * efficiency_ratio
+
+            recompensa = base_reward + efficiency_bonus
+
             self.done_agents.add(agente_id)
             terminou = True
             return recompensa, terminou
@@ -236,15 +250,11 @@ class FarolEnv:
         dist_depois = self._dist_manhattan((novo_x, novo_y))
 
         if dist_depois < dist_antes:
-            recompensa = +1  # aproximou\-se
-        elif dist_depois > dist_antes:
-            recompensa = -0.05  # afastou\-se
+            # Bonus pequeno por aproximação
+            recompensa = +0.1
         else:
-            recompensa = -0.01  # custo neutro por não mudar distância
-
-        # Soma eventual recompensa base do tipo de célula (normalmente 0)
-        if efeito["tipo"] == "vazio":
-            recompensa += efeito.get("recompensa", 0.0)
+            # Custo pequeno por passo (neutro ou afastamento)
+            recompensa = -0.01
 
         return recompensa, terminou
 
