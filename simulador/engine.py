@@ -9,15 +9,16 @@ from metrics import MetricsTracker
 # - executa ações e recebe recompensas
 class MotorDeSimulacao:
     def __init__(self, parametros_execucao):
-        self.params = parametros_execucao  # dicionário de parâmetros
-        self.ambiente = None               # ambiente (Farol ou Foraging)
-        self.agentes = []                  # lista de agentes ativos
-        self.max_steps = parametros_execucao.get("max_steps", 500)  # default 500
-        self.metrics = defaultdict(list)   # métricas registadas
-        self.visualizador = None           # objeto visualizador opcional
-        self.tracker = None                # rastreador de métricas detalhadas
-        # Novo: mapa de spawns iniciais por id de agente
+        self.params = parametros_execucao
+        self.ambiente = None
+        self.agentes = []
+        self.max_steps = parametros_execucao.get("max_steps", 500)
+        self.metrics = defaultdict(list)
+        self.visualizador = None
+        self.tracker = None
         self.agent_spawns = {}
+        # Armazenar nome do problema para nomenclatura de arquivos
+        self.problem = parametros_execucao.get("problem", "Unknown")
 
     # Inicializar lendo ficheiro JSON ou usando dict
     @classmethod
@@ -299,7 +300,10 @@ class MotorDeSimulacao:
 
         # Salvar heatmaps dos agentes no final
         for ag in self.agentes:
-            heatmap_filename = f"heatmap_{ag.id}.csv"
+            # Nomenclatura: heatmap_{problema}_{id_agente}.csv
+            # Ex: heatmap_farol_Q1.csv, heatmap_foraging_QF1.csv
+            problem_name = self.problem.lower() if self.problem else "unknown"
+            heatmap_filename = f"heatmap_{problem_name}_{ag.id}.csv"
             try:
                 ag.save_heatmap(heatmap_filename)
                 print(f"📍 Heatmap salvo: {heatmap_filename}")
