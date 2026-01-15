@@ -2,7 +2,6 @@
   "problem": "Farol",
 
   "episodes": 500,
-  "max_steps": 100,
 
   "environment": {
     "size": 10,

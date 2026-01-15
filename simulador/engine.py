@@ -92,7 +92,7 @@ class MotorDeSimulacao:
                 agente = GAAgentForaging.cria(ag_cfg)
                 agente.id = ag_id
                 agente.modo = modo
-                agente.instala(SensorVisao(alcance=2))
+                agente.instala(SensorVisao(alcance=3))
                 agente.instala(SensorNinho())
                 agente.instala(SensorCarregando())
                 agente.instala(SensorRecursoMaisProximo())

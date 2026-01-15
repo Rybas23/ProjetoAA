@@ -2,7 +2,6 @@
   "problem": "Foraging",
 
   "episodes": 500,
-  "max_steps": 250,
 
   "environment": {
     "width": 10,

@@ -250,8 +250,8 @@ class FarolEnv:
         dist_depois = self._dist_manhattan((novo_x, novo_y))
 
         if dist_depois < dist_antes:
-            # Bonus pequeno por aproximação
-            recompensa = +0.1
+            # Bonus MUITO PEQUENO por aproximação (evita loops de oscilação)
+            recompensa = +0.01
         else:
             # Custo pequeno por passo (neutro ou afastamento)
             recompensa = -0.01
