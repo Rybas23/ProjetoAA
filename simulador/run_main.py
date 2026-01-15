@@ -279,10 +279,11 @@ def main():
     simulador = SimuladorInterativo()
     try:
         #simulador.executarJson("farol.json")
-        # simulador.executarJson("farolFixo.json")
-        #simulador.executarJson("foragingFixo.json")
+        simulador.executarJson("farolFixo.json")
+        #simulador.executarJson("farol_ga.json")
         #simulador.executarJson("foraging.json")
-        simulador.executarJson("farol_ga.json")
+        #simulador.executarJson("foragingFixo.json")
+        #simulador.executarJson("foraging_ga.json")
     except KeyboardInterrupt:
         print("\nInterrompido pelo utilizador")
 

@@ -1,5 +1,5 @@
 {
-  "problem": "FarolFixo",
+  "problem": "Farol",
 
   "episodes": 500,
   "max_steps": 100,
@@ -32,7 +32,7 @@
     {
       "type": "FixedAgent",
       "id": "F1",
-      "policy": "policy_farol_inteligente",
+      "policy": "farol_inteligente",
       "spawn": [0, 0]
     }
   ],
