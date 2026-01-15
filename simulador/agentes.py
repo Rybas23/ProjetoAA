@@ -905,6 +905,7 @@ class GAAgentFarol(GAAgentBase):
             # steps=20 → ratio=0.10 → efficiency=0.90 → bonus=~16000
             # steps=50 → ratio=0.25 → efficiency=0.75 → bonus=~10000
             # steps=100 → ratio=0.50 → efficiency=0.50 → bonus=~5000
+            # steps=200 → ratio=1.00 → efficiency=0.00 → bonus=~0
             efficiency = 1.0 - steps_ratio
             efficiency_bonus = (efficiency ** 2) * 20000.0  # Quadrático!
 
@@ -968,27 +969,91 @@ class GAAgentForaging(GAAgentBase):
             mutation_scale=mutation_scale,
         )
 
+        # INICIALIZAÇÃO INTELIGENTE FORTE para Foraging
+        self._init_intelligent_genome()
+
+    def _init_intelligent_genome(self):
+        """
+        Inicialização INTELIGENTE FORTE para Foraging.
+
+        Features:
+        [0-1]: pos_x, pos_y
+        [2-6]: visão L,R,U,D,C (recursos normalizados 0-1)
+        [7]: carrying (0/1)
+        [8-9]: vetor relativo ao ninho (dx, dy)
+
+        BIAS ESTRATÉGICO:
+        - SEM recurso (carrying=0): Seguir PARA recursos visíveis (feat 2-6)
+        - COM recurso (carrying=1): Seguir PARA ninho usando vetor (feat 8-9)
+        """
+        for action_idx, action in enumerate(self.lista_acoes):
+            for feat_idx in range(self.feature_dim):
+                genome_idx = action_idx * self.feature_dim + feat_idx
+
+                # === FASE 1: SEM RECURSO → Buscar recursos visíveis ===
+
+                # BIAS FORTE: Ir para célula com recursos
+                if feat_idx == 2 and action == 'LEFT':  # vL → LEFT
+                    self.genome[genome_idx] = random.uniform(2.0, 2.5)
+                elif feat_idx == 3 and action == 'RIGHT':  # vR → RIGHT
+                    self.genome[genome_idx] = random.uniform(2.0, 2.5)
+                elif feat_idx == 4 and action == 'UP':  # vU → UP
+                    self.genome[genome_idx] = random.uniform(2.0, 2.5)
+                elif feat_idx == 5 and action == 'DOWN':  # vD → DOWN
+                    self.genome[genome_idx] = random.uniform(2.0, 2.5)
+
+                # BIAS NEGATIVO: Afastar-se de recursos
+                elif feat_idx == 2 and action == 'RIGHT':  # vL mas vai RIGHT
+                    self.genome[genome_idx] = random.uniform(-1.5, -1.0)
+                elif feat_idx == 3 and action == 'LEFT':  # vR mas vai LEFT
+                    self.genome[genome_idx] = random.uniform(-1.5, -1.0)
+                elif feat_idx == 4 and action == 'DOWN':  # vU mas vai DOWN
+                    self.genome[genome_idx] = random.uniform(-1.5, -1.0)
+                elif feat_idx == 5 and action == 'UP':  # vD mas vai UP
+                    self.genome[genome_idx] = random.uniform(-1.5, -1.0)
+
+                # === FASE 2: COM RECURSO → Voltar ao ninho ===
+
+                # Vetor ninho: dx (feat 8)
+                if feat_idx == 8:
+                    if action == 'RIGHT':
+                        # dx > 0 (ninho à direita) → favorece RIGHT
+                        self.genome[genome_idx] = random.uniform(3.0, 3.5)
+                    elif action == 'LEFT':
+                        # dx < 0 (ninho à esquerda) → favorece LEFT
+                        self.genome[genome_idx] = random.uniform(-3.5, -3.0)
+
+                # Vetor ninho: dy (feat 9)
+                if feat_idx == 9:
+                    if action == 'DOWN':
+                        # dy > 0 (ninho abaixo) → favorece DOWN
+                        self.genome[genome_idx] = random.uniform(3.0, 3.5)
+                    elif action == 'UP':
+                        # dy < 0 (ninho acima) → favorece UP
+                        self.genome[genome_idx] = random.uniform(-3.5, -3.0)
+
+                # Carrying flag (feat 7): modula importância do vetor ninho
+                if feat_idx == 7:
+                    # Quando carrying=1, amplifica resposta ao vetor ninho
+                    if action in ['LEFT', 'RIGHT']:
+                        # Amplifica sensibilidade a dx
+                        self.genome[genome_idx] = random.uniform(1.0, 1.5)
+                    elif action in ['UP', 'DOWN']:
+                        # Amplifica sensibilidade a dy
+                        self.genome[genome_idx] = random.uniform(1.0, 1.5)
+
+        self.best_genome = list(self.genome)
+
     @classmethod
     def cria(cls, p):
         """
         Factory compatible with JSON agent config.
-        Example agent block:
-        {
-          "type": "GAAgentForaging",
-          "id": "GA1",
-          "mode": "learn",
-          "mutation_rate": 0.1,
-          "mutation_scale": 0.1
-        }
         """
         if p is None:
             return cls()
         return cls(
             id=p.get("id", "GAForaging"),
-            lista_acoes=p.get(
-                "actions",
-                ["UP", "DOWN", "LEFT", "RIGHT"],
-            ),
+            lista_acoes=p.get("actions", ["UP", "DOWN", "LEFT", "RIGHT"]),
             modo=p.get("mode", "learn"),
             mutation_rate=p.get("mutation_rate", 0.1),
             mutation_scale=p.get("mutation_scale", 0.1),
@@ -996,34 +1061,58 @@ class GAAgentForaging(GAAgentBase):
 
     def _calc_fitness(self):
         """
-        Fitness para Foraging:
-        - PRIORIZA: Recursos entregues (×100 cada)
-        - BONUS: Eficiência (recursos/passo)
-        - INCLUI: Reward acumulado
+        Fitness AGRESSIVO para Foraging: prioriza recursos entregues.
 
-        Formula:
-        fitness = (recursos × 100) + (recursos/steps × 50) + reward
+        COMPONENTES:
+        1. **Recursos entregues** (×10000 cada) - DOMINANTE
+        2. **Eficiência** (recursos/step × 5000) - Bonus grande
+        3. **Progresso parcial** (reward acumulado × 1.0) - Marginal
+        4. **Penalização por bloqueio** (posições repetidas)
+
+        RANGE ESPERADO:
+        - 0 recursos: 0-500 fitness
+        - 1 recurso (50 steps): ~10000 + 1000 = 11000
+        - 1 recurso (20 steps): ~10000 + 2500 = 12500
+        - 3 recursos (100 steps): ~30000 + 1500 = 31500
+        - 5 recursos (150 steps): ~50000 + 1666 = 51666
+        - 8 recursos (200 steps): ~80000 + 2000 = 82000
         """
         ambiente = getattr(self, "ambiente", None)
         delivered = 0
         if ambiente is not None:
             delivered = getattr(ambiente, "total_delivered", 0)
 
-        steps = max(self._current_steps, 1)  # Evitar divisão por zero
+        steps = max(self._current_steps, 1)
 
-        # Componente principal: recursos entregues
-        resource_score = delivered * 100.0
+        # === COMPONENTE 1: Recursos entregues (DOMINANTE) ===
+        resource_score = delivered * 10000.0
 
-        # Bonus de eficiência: recursos por passo
+        # === COMPONENTE 2: Eficiência (bonus grande) ===
         if delivered > 0:
-            efficiency_bonus = (delivered / steps) * 50.0
+            efficiency_ratio = delivered / steps
+            # Bonus QUADRÁTICO por alta eficiência
+            efficiency_bonus = (efficiency_ratio ** 1.5) * 5000.0
         else:
             efficiency_bonus = 0.0
 
-        # Reward acumulado (aproximação, paredes, etc)
-        reward_score = self._episode_reward
+        # === COMPONENTE 3: Reward parcial (exploração inicial) ===
+        # Ajuda agentes que se aproximam mas não entregam ainda
+        reward_score = self._episode_reward * 1.0
 
-        return resource_score + efficiency_bonus + reward_score
+        # === COMPONENTE 4: Penalização por bloqueio ===
+        stuck_penalty = 0.0
+        if hasattr(self, 'episode_heatmap') and self.episode_heatmap:
+            max_visits = max(self.episode_heatmap.values())
+            avg_visits = sum(self.episode_heatmap.values()) / len(self.episode_heatmap)
+
+            # Se visitou mesma célula muitas vezes = loop/bloqueio
+            if max_visits > avg_visits * 5:
+                # Penalização proporcional ao grau de bloqueio
+                stuck_penalty = (max_visits - avg_visits * 2) * 100.0
+
+        fitness = resource_score + efficiency_bonus + reward_score - stuck_penalty
+
+        return max(0.0, fitness)
 
     def _to_features(self, observacao):
         """
@@ -1034,12 +1123,12 @@ class GAAgentForaging(GAAgentBase):
           - "carrying": 0/1
           - "nest": (nx,ny)
         """
-        # 1) position (x,y) normalized by 10 (still reasonable for other sizes)
+        # 1) position (x,y) normalized by 10
         x, y = observacao.get("pos", (0, 0))
         pos_x = float(x) / 10.0
         pos_y = float(y) / 10.0
 
-        # 2) local vision: L,R,U,D,C
+        # 2) local vision: L,R,U,D,C (resources normalized)
         vis = observacao.get("visao", {})
 
         def norm_res(v):
@@ -1066,15 +1155,4 @@ class GAAgentForaging(GAAgentBase):
         dx = float(nx - x) / 10.0
         dy = float(ny - y) / 10.0
 
-        return [
-            pos_x,
-            pos_y,
-            vL,
-            vR,
-            vU,
-            vD,
-            vC,
-            carrying,
-            dx,
-            dy,
-        ]
+        return [pos_x, pos_y, vL, vR, vU, vD, vC, carrying, dx, dy]
